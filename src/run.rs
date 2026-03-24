@@ -108,6 +108,23 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
         // Collect env vars
         let env_vars = provider.env_vars(&install_dir);
         all_tool_env_vars.extend(env_vars);
+
+        // Create per-invocation temp directories for tools that need them
+        match provider.name() {
+            "go" => {
+                let gopath = temp_dirs.create("GOPATH")?;
+                if !cli.quiet {
+                    eprintln!("  GOPATH={}", gopath.display());
+                }
+            }
+            "deno" => {
+                let deno_dir = temp_dirs.create("DENO_DIR")?;
+                if !cli.quiet {
+                    eprintln!("  DENO_DIR={}", deno_dir.display());
+                }
+            }
+            _ => {}
+        }
     }
 
     if cli.dry_run {
