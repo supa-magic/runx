@@ -18,8 +18,9 @@ No daemon, no persistent containers, no impact on your existing tool installatio
 |------|---------------|----------------|
 | **Node.js** | `node@18`, `node@20.11.0`, `node` | nodejs.org dist index |
 | **Python** | `python@3.11`, `python@3.12.1`, `python3` | python-build-standalone (GitHub) |
+| **Go** | `go@1.21`, `go@1.22.0`, `golang` | go.dev official downloads |
 
-More tools (Go, Deno, Bun) are planned.
+More tools (Deno, Bun) are planned.
 
 ## Installation
 
@@ -41,6 +42,9 @@ runx --with node@18 -- node -v
 
 # Run a Python script with Python 3.11
 runx --with python@3.11 -- python3 script.py
+
+# Run a Go program with Go 1.21
+runx --with go@1.21 -- go run main.go
 ```
 
 ### Use multiple tools together
@@ -102,7 +106,7 @@ By default, runx constructs a "clean room" environment for the child process:
 | Category | Variables | Behavior |
 |----------|-----------|----------|
 | **Inherited** | `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR`, `LC_*`, `XDG_*` | Always passed through |
-| **Constructed** | `PATH`, `NODE_HOME`, `PYTHONHOME` | Set by runx based on tool locations |
+| **Constructed** | `PATH`, `NODE_HOME`, `PYTHONHOME`, `GOROOT` | Set by runx based on tool locations |
 | **Blocked** | User's `PATH`, `NVM_DIR`, `PYENV_ROOT`, etc. | Not inherited (isolation) |
 
 With `--inherit-env`, the full user environment is kept and tool paths are prepended to PATH.
@@ -125,6 +129,7 @@ src/
     mod.rs         Provider trait
     node.rs        Node.js provider
     python.rs      Python provider
+    go.rs          Go provider
 ```
 
 ## License
