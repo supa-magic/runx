@@ -20,8 +20,7 @@ No daemon, no persistent containers, no impact on your existing tool installatio
 | **Python** | `python@3.11`, `python@3.12.1`, `python3` | python-build-standalone (GitHub) |
 | **Go** | `go@1.21`, `go@1.22.0`, `golang` | go.dev official downloads |
 | **Deno** | `deno@1.40`, `deno@2.0.0`, `deno` | GitHub releases (denoland/deno) |
-
-More tools (Bun) are planned.
+| **Bun** | `bun@1.1`, `bun@1.2.0`, `bunx` | GitHub releases (oven-sh/bun) |
 
 ## Installation
 
@@ -49,6 +48,9 @@ runx --with go@1.21 -- go run main.go
 
 # Run a Deno script with Deno 2.0
 runx --with deno@2.0 -- deno run server.ts
+
+# Run a Bun script with Bun 1.2
+runx --with bun@1.2 -- bun run index.ts
 ```
 
 ### Use multiple tools together
@@ -135,6 +137,7 @@ src/
     python.rs      Python provider
     go.rs          Go provider
     deno.rs        Deno provider
+    bun.rs         Bun provider
 ```
 
 ## License
