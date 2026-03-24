@@ -9,8 +9,10 @@ ctrlc = { version = "3", features = ["termination"] }
 dirs = "6"
 flate2 = "1"
 indicatif = "0.17"
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "blocking"] }
 semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 tar = "0.4"
 tempfile = "3"
@@ -19,6 +21,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 
+zip = "4"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-zip = "4"
