@@ -47,6 +47,19 @@ pub struct PluginManifest {
     #[serde(default)]
     #[allow(dead_code)] // Reserved for future shebang integration with plugins
     pub interpreter: Vec<String>,
+    /// Shell command to run after extraction (e.g., "./install.sh --prefix={install_dir}").
+    /// Supports placeholders: {install_dir}, {version}, {os}, {arch}.
+    /// Runs with CWD set to the install directory.
+    #[serde(default)]
+    pub post_install: Option<String>,
+    /// Timeout for post_install in seconds (default: 300 = 5 minutes).
+    #[serde(default = "default_post_install_timeout")]
+    #[allow(dead_code)] // Reserved for future timeout enforcement
+    pub post_install_timeout: u64,
+}
+
+fn default_post_install_timeout() -> u64 {
+    300
 }
 
 fn default_archive_format() -> String {
@@ -64,6 +77,18 @@ impl PluginManifest {
             .replace("{version}", &version.to_string())
             .replace("{os}", &target.platform.to_string().to_lowercase())
             .replace("{arch}", &target.arch.to_string())
+    }
+
+    /// Expand placeholders including {install_dir}.
+    fn expand_with_dir(
+        &self,
+        template: &str,
+        version: &semver::Version,
+        target: &Target,
+        install_dir: &Path,
+    ) -> String {
+        self.expand(template, version, target)
+            .replace("{install_dir}", &install_dir.display().to_string())
     }
 }
 
@@ -123,6 +148,18 @@ impl Provider for PluginProvider {
 
     fn env_vars(&self, _install_dir: &Path) -> HashMap<String, String> {
         HashMap::new()
+    }
+
+    fn post_install_command(
+        &self,
+        version: &semver::Version,
+        target: &Target,
+        install_dir: &Path,
+    ) -> Option<String> {
+        self.manifest.post_install.as_ref().map(|cmd| {
+            self.manifest
+                .expand_with_dir(cmd, version, target, install_dir)
+        })
     }
 }
 
@@ -302,6 +339,8 @@ download_url = "https://example.com/{version}/mytool.tar.gz"
             archive_format: "tar.xz".to_string(),
             bin_path: "zig-{os}-{arch}-{version}".to_string(),
             interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
         };
 
         let version = semver::Version::new(0, 11, 0);
@@ -338,6 +377,8 @@ download_url = "https://example.com/{version}/mytool.tar.gz"
             archive_format: fmt.to_string(),
             bin_path: "bin".to_string(),
             interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
         };
 
         let target = Target::new(
@@ -371,5 +412,118 @@ download_url = "https://example.com/{version}/mytool.tar.gz"
     fn test_list_plugins_no_dir() {
         let result = list_plugins();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_plugin_manifest_with_post_install() {
+        let toml_str = r#"
+name = "rust"
+download_url = "https://static.rust-lang.org/dist/rust-{version}-{arch}-{os}.tar.gz"
+post_install = "./install.sh --prefix={install_dir} --without=rust-docs"
+post_install_timeout = 600
+"#;
+        let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            manifest.post_install.as_deref(),
+            Some("./install.sh --prefix={install_dir} --without=rust-docs")
+        );
+        assert_eq!(manifest.post_install_timeout, 600);
+    }
+
+    #[test]
+    fn test_plugin_manifest_default_post_install() {
+        let toml_str = r#"
+name = "simple"
+download_url = "https://example.com/{version}/tool.tar.gz"
+"#;
+        let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.post_install.is_none());
+        assert_eq!(manifest.post_install_timeout, 300);
+    }
+
+    #[test]
+    fn test_plugin_expand_with_install_dir() {
+        let manifest = PluginManifest {
+            name: "rust".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: Some("./install.sh --prefix={install_dir}".to_string()),
+            post_install_timeout: 300,
+        };
+
+        let version = semver::Version::new(1, 82, 0);
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::X86_64,
+        );
+
+        let expanded = manifest.expand_with_dir(
+            manifest.post_install.as_ref().unwrap(),
+            &version,
+            &target,
+            Path::new("/home/user/.runx/cache/rust/1.82.0"),
+        );
+        assert_eq!(
+            expanded,
+            "./install.sh --prefix=/home/user/.runx/cache/rust/1.82.0"
+        );
+    }
+
+    #[test]
+    fn test_plugin_provider_post_install_command() {
+        let manifest = PluginManifest {
+            name: "rust".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: Some("./install.sh --prefix={install_dir}".to_string()),
+            post_install_timeout: 300,
+        };
+
+        let provider = PluginProvider { manifest };
+        let version = semver::Version::new(1, 82, 0);
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::X86_64,
+        );
+
+        let cmd = provider.post_install_command(&version, &target, Path::new("/cache/rust/1.82.0"));
+        assert!(cmd.is_some());
+        assert!(cmd.unwrap().contains("--prefix=/cache/rust/1.82.0"));
+    }
+
+    #[test]
+    fn test_plugin_provider_no_post_install() {
+        let manifest = PluginManifest {
+            name: "zig".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+
+        let provider = PluginProvider { manifest };
+        let version = semver::Version::new(0, 11, 0);
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::X86_64,
+        );
+
+        assert!(
+            provider
+                .post_install_command(&version, &target, Path::new("/cache"))
+                .is_none()
+        );
     }
 }

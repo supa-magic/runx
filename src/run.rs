@@ -226,6 +226,20 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
         }
     }
 
+    // Phase 2b: Run post-install hooks for freshly downloaded tools
+    for tool in &resolved_tools {
+        if !tool.cached
+            && let Some(cmd) =
+                tool.provider
+                    .post_install_command(&tool.version, &target, &tool.install_dir)
+        {
+            if !cli.quiet {
+                eprintln!("Running post-install for {}...", tool.name);
+            }
+            run_post_install(&cmd, &tool.install_dir, &tool.name)?;
+        }
+    }
+
     // Phase 3: Collect bin paths, env vars, and temp dirs
     let mut all_bin_dirs: Vec<PathBuf> = Vec::new();
     let mut all_tool_env_vars: HashMap<String, String> = HashMap::new();
@@ -272,6 +286,37 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
     let code = executor::exit_code(&status);
     if code != 0 {
         std::process::exit(code);
+    }
+
+    Ok(())
+}
+
+/// Run a post-install shell command in the given directory.
+fn run_post_install(
+    command: &str,
+    install_dir: &std::path::Path,
+    tool_name: &str,
+) -> Result<(), RunxError> {
+    let shell = if cfg!(windows) { "cmd" } else { "sh" };
+    let flag = if cfg!(windows) { "/c" } else { "-c" };
+
+    let status = std::process::Command::new(shell)
+        .args([flag, command])
+        .current_dir(install_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .status()
+        .map_err(|e| {
+            RunxError::Plugin(format!("post-install for {tool_name} failed to start: {e}"))
+        })?;
+
+    if !status.success() {
+        // Clean up the install dir to prevent a corrupt cache entry
+        let _ = std::fs::remove_dir_all(install_dir);
+        return Err(RunxError::Plugin(format!(
+            "post-install for {tool_name} failed with exit code {}.\n  Command: {command}\n  The install directory has been cleaned up.",
+            status.code().unwrap_or(-1)
+        )));
     }
 
     Ok(())

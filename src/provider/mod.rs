@@ -206,6 +206,20 @@ pub trait Provider {
     fn temp_env_dirs(&self) -> Vec<&'static str> {
         Vec::new()
     }
+
+    /// Return an optional post-install command to run after extraction.
+    ///
+    /// The command runs with CWD set to `install_dir`. Placeholders
+    /// `{install_dir}`, `{version}`, `{os}`, `{arch}` are expanded.
+    /// Default: no post-install step.
+    fn post_install_command(
+        &self,
+        _version: &semver::Version,
+        _target: &Target,
+        _install_dir: &std::path::Path,
+    ) -> Option<String> {
+        None
+    }
 }
 
 /// Errors that occur during provider operations.
