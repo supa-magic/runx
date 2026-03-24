@@ -146,6 +146,26 @@ runx clean --tool node         # Remove only Node.js caches
 runx clean --older-than 30d    # Remove stale caches
 ```
 
+## Global Install
+
+Install tools globally so they're available without `runx --with`:
+
+```bash
+runx install node@22            # Download and symlink to ~/.runx/bin/
+runx install node@22 python@3.12  # Install multiple tools at once
+runx install                    # Install all tools from .runxrc
+runx install --list             # Show globally installed tools
+runx uninstall node             # Remove symlinks
+```
+
+Add `~/.runx/bin` to your PATH to use installed tools directly:
+
+```bash
+export PATH="$HOME/.runx/bin:$PATH"
+```
+
+On Windows, `.cmd` shims are created instead of symlinks.
+
 ## Shell Completions
 
 ```bash
@@ -218,6 +238,8 @@ runx [OPTIONS] [-- <CMD>...]
 runx <COMMAND>
 
 Commands:
+  install      Install tools globally to ~/.runx/bin/
+  uninstall    Remove globally installed tools
   list         List available tools and cached versions
   clean        Remove cached tool binaries
   init         Scaffold a .runxrc config file

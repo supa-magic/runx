@@ -30,6 +30,12 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
         Some(Command::Init { tools, force }) => {
             crate::init::run(&tools, force)?;
         }
+        Some(Command::Install { tool, list }) => {
+            crate::install::install(tool, list).await?;
+        }
+        Some(Command::Uninstall { tool }) => {
+            crate::install::uninstall(&tool)?;
+        }
         Some(Command::Completions { shell }) => {
             generate_completions(shell);
         }

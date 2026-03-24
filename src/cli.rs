@@ -171,6 +171,28 @@ pub enum Command {
         force: bool,
     },
 
+    /// Install a tool globally by symlinking into ~/.runx/bin/
+    #[command(
+        after_help = "Examples:\n  runx install node@22               Install Node.js 22\n  runx install --list                Show globally installed tools\n  runx install                       Install tools from .runxrc"
+    )]
+    Install {
+        /// Tool to install (e.g. node@22)
+        tool: Option<ToolSpec>,
+
+        /// Show globally installed tools
+        #[arg(long)]
+        list: bool,
+    },
+
+    /// Remove a globally installed tool
+    #[command(
+        after_help = "Examples:\n  runx uninstall node                Remove Node.js symlinks"
+    )]
+    Uninstall {
+        /// Tool to uninstall
+        tool: ToolSpec,
+    },
+
     /// Generate shell completions for bash, zsh, or fish
     #[command(
         after_help = "Examples:\n  runx completions bash > ~/.bash_completion.d/runx\n  runx completions zsh > ~/.zfunc/_runx\n  runx completions fish > ~/.config/fish/completions/runx.fish"

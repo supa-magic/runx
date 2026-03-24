@@ -7,6 +7,7 @@ mod environment;
 mod error;
 mod executor;
 mod init;
+mod install;
 mod list;
 mod platform;
 mod provider;
