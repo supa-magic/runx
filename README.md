@@ -86,9 +86,9 @@ runx --with node@18 --inherit-env -- node -v
 ### Cache management
 
 ```bash
-runx list                          # Show supported tools
-runx list --cached                 # Show cached tool versions with sizes
-runx list node                     # Show info for a specific tool
+runx list                          # Show all supported tools with aliases and cache status
+runx list --cached                 # Show cached tool versions with disk sizes
+runx list node                     # Query upstream for available versions of a tool
 runx clean                         # Remove all cached binaries
 runx clean --tool node             # Remove only Node.js caches
 runx clean --older-than 30d        # Remove caches older than 30 days
