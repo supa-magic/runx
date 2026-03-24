@@ -83,6 +83,26 @@ By default, runx creates a clean, isolated environment. Use `--inherit-env` to p
 runx --with node@18 --inherit-env -- node -v
 ```
 
+### Project config with `.runxrc`
+
+Instead of passing `--with` flags every time, create a `.runxrc` file in your project root:
+
+```toml
+tools = ["node@18", "python@3.11"]
+inherit_env = true
+```
+
+runx automatically discovers `.runxrc` by searching the current directory and walking up parent directories. CLI `--with` flags override tools specified in the config file.
+
+Use `--dry-run` or `--verbose` to see which config file was loaded:
+
+```bash
+runx --dry-run -- node -v
+# Shows: loaded config from /path/to/project/.runxrc
+```
+
+Scaffold a new config file with `runx init`.
+
 ### Cache management
 
 ```bash
@@ -123,6 +143,7 @@ With `--inherit-env`, the full user environment is kept and tool paths are prepe
 src/
   main.rs          Entry point (tokio async)
   cli.rs           CLI parsing (clap derive)
+  config.rs        .runxrc TOML config file discovery and parsing
   run.rs           Orchestration: resolve -> download -> env -> execute
   cache.rs         ~/.runx/cache/ management
   download.rs      Streaming HTTP download + archive extraction

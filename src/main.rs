@@ -1,5 +1,6 @@
 mod cache;
 mod cli;
+mod config;
 mod download;
 mod environment;
 mod error;
