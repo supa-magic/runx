@@ -50,6 +50,7 @@ impl Platform {
     }
 
     /// Executable suffix for this platform.
+    #[allow(unused)] // Used by Target::binary_name()
     pub fn exe_suffix(&self) -> &'static str {
         match self {
             Self::MacOS | Self::Linux => "",
@@ -140,6 +141,7 @@ impl Target {
     /// Build a binary filename with the correct executable suffix.
     ///
     /// Example: `binary_name("node")` → `"node"` on Unix, `"node.exe"` on Windows.
+    #[allow(unused)] // Utility for future provider use
     pub fn binary_name(&self, name: &str) -> String {
         format!("{name}{}", self.platform.exe_suffix())
     }
@@ -147,6 +149,7 @@ impl Target {
     /// Return the cache directory name for this target.
     ///
     /// Example: `"darwin-arm64"` for macOS aarch64.
+    #[allow(unused)] // Utility for cache path construction
     pub fn cache_dir_name(&self) -> String {
         format!(
             "{}-{}",

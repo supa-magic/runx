@@ -151,6 +151,10 @@ impl Provider for GoProvider {
             install_dir.join("go").to_string_lossy().to_string(),
         )])
     }
+
+    fn temp_env_dirs(&self) -> Vec<&'static str> {
+        vec!["GOPATH"]
+    }
 }
 
 #[cfg(test)]

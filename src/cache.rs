@@ -9,10 +9,12 @@ use crate::platform::Target;
 /// ~/.runx/cache/<tool>/<version>/<platform>-<arch>/
 /// ```
 #[derive(Debug, Clone)]
+#[allow(unused)] // Methods used by run.rs (new, install_path, is_cached) + upcoming clean/list subcommands
 pub struct Cache {
     root: PathBuf,
 }
 
+#[allow(unused)] // Methods used by run.rs + upcoming clean/list subcommands
 impl Cache {
     /// Create a new cache rooted at `~/.runx/cache/`.
     pub fn new() -> Result<Self, CacheError> {
@@ -149,6 +151,7 @@ impl Cache {
 
 /// Information about a cached tool.
 #[derive(Debug, Clone)]
+#[allow(unused)] // Used by list_cached(), wired up with the `list` subcommand
 pub struct CachedTool {
     pub name: String,
     pub versions: Vec<String>,
@@ -157,6 +160,7 @@ pub struct CachedTool {
 
 /// Errors that occur during cache operations.
 #[derive(Debug, thiserror::Error)]
+#[allow(unused)] // Io variant used by upcoming clean/list subcommands
 pub enum CacheError {
     #[error("cannot determine home directory")]
     NoHomeDir,
@@ -168,6 +172,7 @@ pub enum CacheError {
     },
 }
 
+#[allow(unused)] // Used by clean_tool/clean_all, wired with upcoming clean subcommand
 /// Recursively compute the total size of a directory in bytes.
 ///
 /// Silently skips entries that can't be read (permissions, broken symlinks).
