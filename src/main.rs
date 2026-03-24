@@ -4,6 +4,7 @@ mod download;
 mod environment;
 mod error;
 mod executor;
+mod list;
 mod platform;
 mod provider;
 mod run;

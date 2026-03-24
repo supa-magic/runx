@@ -18,7 +18,7 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
             println!("clean: tool={tool:?}, older_than={older_than:?}");
         }
         Some(Command::List { cached, tool }) => {
-            println!("list: cached={cached}, tool={tool:?}");
+            crate::list::run(cached, tool).await?;
         }
         Some(Command::Init) => {
             println!("init: scaffolding .runxrc");
