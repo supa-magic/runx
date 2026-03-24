@@ -115,6 +115,7 @@ impl Environment {
     }
 
     /// Return the environment variables as owned key-value pairs.
+    #[allow(unused)] // Available for consumers that need ownership
     pub fn into_vars(self) -> HashMap<String, String> {
         self.vars
     }

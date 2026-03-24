@@ -112,9 +112,11 @@ impl Provider for DenoProvider {
     }
 
     fn env_vars(&self, _install_dir: &Path) -> HashMap<String, String> {
-        // DENO_DIR is managed by TempDirs in run.rs, not here.
-        // No static env vars needed for Deno.
         HashMap::new()
+    }
+
+    fn temp_env_dirs(&self) -> Vec<&'static str> {
+        vec!["DENO_DIR"]
     }
 }
 

@@ -150,6 +150,15 @@ pub trait Provider {
 
     /// Return environment variables to set for this tool.
     fn env_vars(&self, install_dir: &std::path::Path) -> HashMap<String, String>;
+
+    /// Return names of environment variables that need per-invocation temp directories.
+    ///
+    /// For example, Go needs `GOPATH` and Deno needs `DENO_DIR` as ephemeral
+    /// temp directories that are cleaned up after the command exits.
+    /// Default: no temp dirs needed.
+    fn temp_env_dirs(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 /// Errors that occur during provider operations.
