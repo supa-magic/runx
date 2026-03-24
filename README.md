@@ -125,6 +125,21 @@ runx init --with node@18           # Non-interactive with specific tools
 runx init --force                  # Overwrite existing .runxrc
 ```
 
+### Shell completions
+
+Generate tab-completion scripts for your shell:
+
+```bash
+# Bash (add to ~/.bashrc)
+eval "$(runx completions bash)"
+
+# Zsh (add to ~/.zshrc)
+eval "$(runx completions zsh)"
+
+# Fish (add to ~/.config/fish/config.fish)
+runx completions fish | source
+```
+
 ## How It Works
 
 1. **Resolve** -- Queries upstream version APIs to resolve `node@18` to an exact version like `18.19.1`

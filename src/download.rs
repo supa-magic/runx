@@ -320,10 +320,14 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), DownloadError> {
 /// Errors that occur during download and extraction operations.
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
-    #[error("HTTP request failed for `{url}`: {source}")]
+    #[error(
+        "HTTP request failed for `{url}`: {source}\n  Check your network connection and try again."
+    )]
     Http { url: String, source: reqwest::Error },
 
-    #[error("HTTP {status} error for `{url}`")]
+    #[error(
+        "HTTP {status} error for `{url}`.\n  The download URL may be incorrect or the server may be down."
+    )]
     HttpStatus { url: String, status: u16 },
 
     #[error("I/O error at `{}`: {source}", path.display())]
@@ -416,10 +420,9 @@ mod tests {
             url: "https://example.com/file.tar.gz".to_string(),
             status: 404,
         };
-        assert_eq!(
-            err.to_string(),
-            "HTTP 404 error for `https://example.com/file.tar.gz`"
-        );
+        let msg = err.to_string();
+        assert!(msg.contains("HTTP 404 error for `https://example.com/file.tar.gz`"));
+        assert!(msg.contains("server may be down"));
 
         let err = DownloadError::ChecksumMismatch {
             expected: "aaa".to_string(),

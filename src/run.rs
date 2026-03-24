@@ -30,6 +30,9 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
         Some(Command::Init { tools, force }) => {
             crate::init::run(&tools, force)?;
         }
+        Some(Command::Completions { shell }) => {
+            generate_completions(shell);
+        }
         None => {
             if cli.cmd.is_empty() {
                 return Err(RunxError::NoCommand);
@@ -249,6 +252,21 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
     }
 
     Ok(())
+}
+
+/// Generate shell completions and print to stdout.
+fn generate_completions(shell: crate::cli::ShellType) {
+    use clap::CommandFactory;
+    use clap_complete::Shell;
+
+    let shell = match shell {
+        crate::cli::ShellType::Bash => Shell::Bash,
+        crate::cli::ShellType::Zsh => Shell::Zsh,
+        crate::cli::ShellType::Fish => Shell::Fish,
+    };
+
+    let mut cmd = Cli::command();
+    clap_complete::generate(shell, &mut cmd, "runx", &mut std::io::stdout());
 }
 
 #[cfg(test)]
