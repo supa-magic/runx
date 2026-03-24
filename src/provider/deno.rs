@@ -270,6 +270,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_releases_all_unparseable_returns_error() {
+        let json = r#"[{"tag_name": "notaversion"}, {"tag_name": "also-bad"}]"#;
+        assert!(DenoProvider::parse_releases(json).is_err());
+    }
+
+    #[test]
+    fn test_parse_releases_deduplicates() {
+        let json = r#"[
+            {"tag_name": "v1.40.5"},
+            {"tag_name": "v1.40.5"}
+        ]"#;
+        let versions = DenoProvider::parse_releases(json).unwrap();
+        assert_eq!(versions.len(), 1);
+    }
+
+    #[test]
     fn test_parse_releases_empty_returns_error() {
         assert!(DenoProvider::parse_releases("[]").is_err());
     }
