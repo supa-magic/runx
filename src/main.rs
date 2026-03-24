@@ -1,4 +1,8 @@
+#[allow(unused)]
+mod cache;
 mod cli;
+#[allow(unused)]
+mod download;
 mod error;
 #[allow(unused)]
 mod platform;
@@ -11,7 +15,8 @@ mod version;
 use clap::Parser;
 use cli::Cli;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
     if let Err(e) = run::run(cli) {
         eprintln!("error: {e}");

@@ -5,5 +5,16 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+dirs = "6"
+flate2 = "1"
+indicatif = "0.17"
+reqwest = { version = "0.12", features = ["stream"] }
 semver = "1"
+sha2 = "0.10"
+tar = "0.4"
+tempfile = "3"
 thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+zip = "4"
