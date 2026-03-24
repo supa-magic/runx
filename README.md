@@ -67,12 +67,17 @@ runx --with node -- npx wrangler dev
 <summary><b>Python</b> — isolated Python without pyenv or conda</summary>
 
 ```bash
-# Django, FastAPI, Flask
-runx --with python -- pip install django && django-admin startproject mysite
-runx --with python@3.12 -- pip install "fastapi[standard]" && uvicorn main:app
+# Django
+runx --with python -- pip install django
+runx --with python -- django-admin startproject mysite
+
+# FastAPI
+runx --with python@3.12 -- pip install "fastapi[standard]"
+runx --with python@3.12 -- uvicorn main:app
 
 # Data science
-runx --with python@3.11 -- pip install pandas numpy && python3 analyze.py
+runx --with python@3.11 -- pip install pandas numpy
+runx --with python@3.11 -- python3 analyze.py
 
 # Test across versions
 runx --with python@3.11 -- pytest
@@ -99,7 +104,9 @@ runx --with go -- go run github.com/gohugoio/hugo@latest new site mysite
 ```bash
 runx --with deno -- deno run server.ts
 runx --with deno -- deno run -A https://fresh.deno.dev my-fresh-app
-runx --with deno -- deno fmt && deno lint && deno test
+runx --with deno -- deno fmt
+runx --with deno -- deno lint
+runx --with deno -- deno test
 ```
 
 </details>
@@ -109,7 +116,8 @@ runx --with deno -- deno fmt && deno lint && deno test
 
 ```bash
 runx --with bun -- bun run index.ts
-runx --with bun -- bun create elysia my-app && cd my-app && bun run dev
+runx --with bun -- bun create elysia my-app
+runx --with bun -- bun run --cwd my-app dev
 runx --with bun -- bunx prisma generate
 ```
 
@@ -119,9 +127,14 @@ runx --with bun -- bunx prisma generate
 <summary><b>Ruby</b> — prebuilt Ruby, no compilation wait</summary>
 
 ```bash
-runx --with ruby -- gem install rails && rails new myapp
-runx --with ruby -- gem install sinatra && ruby app.rb
-runx --with ruby -- gem install jekyll && jekyll new myblog
+runx --with ruby -- gem install rails
+runx --with ruby -- rails new myapp
+
+runx --with ruby -- gem install sinatra
+runx --with ruby -- ruby app.rb
+
+runx --with ruby -- gem install jekyll
+runx --with ruby -- jekyll new myblog
 ```
 
 </details>
@@ -130,7 +143,8 @@ runx --with ruby -- gem install jekyll && jekyll new myblog
 <summary><b>Java</b> — any JDK via Adoptium (JAVA_HOME set automatically)</summary>
 
 ```bash
-runx --with java@21 -- javac Main.java && java Main
+runx --with java@21 -- javac Main.java
+runx --with java@21 -- java Main
 runx --with java@21 -- ./mvnw spring-boot:run
 runx --with java@21 -- ./gradlew build
 runx --with java@17 -- ./mvnw test
@@ -145,8 +159,9 @@ runx --with java -- jshell
 ```bash
 runx --with rust -- cargo build --release
 runx --with rust -- cargo test
-runx --with rust -- cargo clippy && cargo fmt --check
-runx --with rust -- cargo init hello && cd hello && cargo run
+runx --with rust -- cargo clippy
+runx --with rust -- cargo fmt --check
+runx --with rust -- cargo init hello
 ```
 
 </details>
@@ -156,13 +171,16 @@ runx --with rust -- cargo init hello && cd hello && cargo run
 
 ```bash
 # OpenAI / Anthropic SDK
-runx --with python@3.12 -- pip install anthropic && python3 agent.py
+runx --with python@3.12 -- pip install anthropic
+runx --with python@3.12 -- python3 agent.py
 
 # LangChain + FastAPI
-runx --with python@3.12 -- pip install langchain fastapi uvicorn && uvicorn api:app
+runx --with python@3.12 -- pip install langchain fastapi uvicorn
+runx --with python@3.12 -- uvicorn api:app
 
 # Hugging Face transformers
-runx --with python@3.11 -- pip install torch transformers && python3 train.py
+runx --with python@3.11 -- pip install torch transformers
+runx --with python@3.11 -- python3 train.py
 
 # Node.js AI SDK (Vercel AI)
 runx --with node -- npx create-ai-app my-ai-app
@@ -279,7 +297,7 @@ runx --with node             -- node -v   # Latest stable
 ### Lockfile
 
 ```bash
-runx lock                    # Resolve .runxrc → .runxrc.lock (exact versions + URLs + checksums)
+runx lock                    # Resolve .runxrc → .runxrc.lock (exact versions + URLs)
 runx lock --update           # Re-resolve and update
 ```
 
@@ -353,16 +371,18 @@ tools = ["node@22", "python@3.12"]
 ```dockerfile
 FROM ubuntu:24.04
 COPY runx /usr/local/bin/runx
-COPY .runxrc .
+COPY .runxrc .runxrc.lock* ./
 
 RUN runx -- npm ci
 RUN runx -- npm run build
 RUN runx -- pip install -r requirements.txt
 
-CMD ["runx", "--", "uvicorn", "main:app", "--host", "0.0.0.0"]
+# For production, install globally to avoid runx overhead on every start
+RUN runx install
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0"]
 ```
 
-Same `.runxrc` used by developers, CI, and Docker — versions stay in sync everywhere.
+Same `.runxrc` used by developers, CI, and Docker — versions stay in sync everywhere. The `.runxrc.lock` ensures the exact same binaries in every build.
 
 <details>
 <summary><b>Compare: traditional multi-stage Dockerfile</b></summary>
@@ -514,9 +534,9 @@ runx --with node@22 -- node server.js
 Cached tools skip steps 1-3 — repeat runs start in **milliseconds**.
 
 Every command runs in a **clean-room environment**:
-- **Inherited:** `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR`
-- **Constructed:** `PATH` = tool bins + `/usr/bin`
-- **Blocked:** your `PATH`, `NVM_DIR`, `PYENV_ROOT`, and all other vars
+- **Inherited:** `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR`, plus `LC_*` and `XDG_*` prefixed vars
+- **Constructed:** `PATH` = tool bins + `/usr/bin:/bin`
+- **Blocked:** your `PATH`, `NVM_DIR`, `PYENV_ROOT`, and everything else
 
 Need your full environment? Add `--inherit-env`.
 
@@ -609,6 +629,7 @@ OPTIONS:
   --inherit-env           Pass through your full shell environment
   -v, --verbose           Show download progress and debug info
   -q, --quiet             Suppress all progress output
+  -V, --version           Print version
   -h, --help              Print help
 ```
 
