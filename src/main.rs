@@ -1,6 +1,12 @@
 mod cli;
 mod error;
+#[allow(unused)]
+mod platform;
+#[allow(unused)]
+mod provider;
 mod run;
+#[allow(unused)]
+mod version;
 
 use clap::Parser;
 use cli::Cli;
