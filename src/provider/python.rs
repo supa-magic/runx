@@ -11,6 +11,8 @@ use super::{ArchiveFormat, Provider, ProviderError};
 /// GitHub release entry from the python-build-standalone repository.
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
+    /// Release tag (e.g., "20240224"). Parsed for potential caching/logging.
+    #[allow(unused)]
     tag_name: String,
     assets: Vec<GitHubAsset>,
 }
@@ -70,10 +72,11 @@ impl PythonProvider {
         let mut versions = Vec::new();
         for release in &releases {
             for asset in &release.assets {
-                if let Some(ver) = Self::extract_version_from_asset(&asset.name) {
-                    if ver.pre.is_empty() && !versions.contains(&ver) {
-                        versions.push(ver);
-                    }
+                if let Some(ver) = Self::extract_version_from_asset(&asset.name)
+                    && ver.pre.is_empty()
+                    && !versions.contains(&ver)
+                {
+                    versions.push(ver);
                 }
             }
         }
@@ -92,8 +95,11 @@ impl PythonProvider {
     ///
     /// Asset names look like: `cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz`
     fn extract_version_from_asset(name: &str) -> Option<semver::Version> {
-        // Must start with "cpython-" and contain "install_only"
-        if !name.starts_with("cpython-") || !name.contains("install_only") {
+        // Skip checksum files and non-cpython assets
+        if !name.starts_with("cpython-")
+            || !name.contains("install_only")
+            || name.ends_with(".sha256")
+        {
             return None;
         }
 
@@ -101,20 +107,6 @@ impl PythonProvider {
         let after_prefix = name.strip_prefix("cpython-")?;
         let version_str = after_prefix.split('+').next()?;
         semver::Version::parse(version_str).ok()
-    }
-
-    /// Construct the asset name pattern for a given version and target.
-    fn asset_pattern(version: &semver::Version, target: &Target) -> String {
-        let arch = match target.arch {
-            Arch::X86_64 => "x86_64",
-            Arch::Aarch64 => "aarch64",
-        };
-        let os_triple = match target.platform {
-            Platform::MacOS => "apple-darwin",
-            Platform::Linux => "unknown-linux-gnu",
-            Platform::Windows => "pc-windows-msvc-shared",
-        };
-        format!("cpython-{version}+*-{arch}-{os_triple}-install_only")
     }
 
     /// Find the download URL for a specific version and target from releases.
@@ -324,30 +316,6 @@ mod tests {
         assert_eq!(vars.len(), 1);
     }
 
-    // --- Asset pattern ---
-
-    #[test]
-    fn test_asset_pattern_macos_arm64() {
-        let pattern = PythonProvider::asset_pattern(&v("3.11.8"), &macos_arm64());
-        assert!(pattern.contains("cpython-3.11.8+"));
-        assert!(pattern.contains("aarch64-apple-darwin"));
-        assert!(pattern.contains("install_only"));
-    }
-
-    #[test]
-    fn test_asset_pattern_linux_x64() {
-        let pattern = PythonProvider::asset_pattern(&v("3.12.1"), &linux_x64());
-        assert!(pattern.contains("cpython-3.12.1+"));
-        assert!(pattern.contains("x86_64-unknown-linux-gnu"));
-        assert!(pattern.contains("install_only"));
-    }
-
-    #[test]
-    fn test_asset_pattern_windows() {
-        let pattern = PythonProvider::asset_pattern(&v("3.11.8"), &windows_x64());
-        assert!(pattern.contains("x86_64-pc-windows-msvc-shared"));
-    }
-
     // --- extract_version_from_asset ---
 
     #[test]
@@ -379,11 +347,8 @@ mod tests {
     #[test]
     fn test_extract_version_ignores_checksum_files() {
         let name = "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz.sha256";
-        // This actually starts with cpython- and contains install_only, but
-        // the version extraction should still work — it's the URL matching
-        // in find_download_url that filters by suffix.
-        let ver = PythonProvider::extract_version_from_asset(name);
-        assert!(ver.is_some()); // Version is extractable, filtering happens elsewhere
+        // .sha256 files are now rejected at the extraction level
+        assert!(PythonProvider::extract_version_from_asset(name).is_none());
     }
 
     // --- parse_releases ---
