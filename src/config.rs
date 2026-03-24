@@ -297,4 +297,61 @@ inherit_env = true
         let found = find_config(dir.path());
         assert!(found.is_none());
     }
+
+    // --- ConfigError::Read display ---
+
+    #[test]
+    fn test_config_error_read_display() {
+        let err = ConfigError::Read {
+            path: PathBuf::from("/tmp/.runxrc"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("failed to read config"));
+        assert!(msg.contains("/tmp/.runxrc"));
+        assert!(msg.contains("access denied"));
+    }
+
+    // --- find_ancestor_file ---
+
+    #[test]
+    fn test_find_ancestor_file_not_found_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = find_ancestor_file(dir.path(), "nonexistent.file");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_ancestor_file_finds_in_current_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("target.txt");
+        std::fs::write(&file, "data").unwrap();
+        assert_eq!(find_ancestor_file(dir.path(), "target.txt"), Some(file));
+    }
+
+    #[test]
+    fn test_find_ancestor_file_finds_in_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("target.txt");
+        std::fs::write(&file, "data").unwrap();
+        let child = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&child).unwrap();
+        assert_eq!(find_ancestor_file(&child, "target.txt"), Some(file));
+    }
+
+    // --- load_config: tools field with multiple tools ---
+
+    #[test]
+    fn test_load_config_multiple_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "tools = [\"node@20\", \"go@1.21\", \"deno\"]\n",
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.tools.len(), 3);
+        assert_eq!(config.tools[2].name, "deno");
+        assert_eq!(config.tools[2].version, None);
+    }
 }

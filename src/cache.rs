@@ -461,4 +461,94 @@ mod tests {
         };
         assert!(err.to_string().contains("/tmp/test"));
     }
+
+    // --- remove_candidates: happy path ---
+
+    #[test]
+    fn test_remove_candidates_frees_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::with_root(dir.path().to_path_buf());
+        let target = test_target();
+        let version = test_version();
+
+        cache
+            .prepare_install_dir("node", &version, &target)
+            .unwrap();
+        let install = cache.install_path("node", &version, &target);
+        // Write a real file so dir_size returns > 0
+        std::fs::write(install.join("node"), b"fake binary data").unwrap();
+
+        // Build a CleanCandidates entry pointing at the version dir
+        let version_dir = install.parent().unwrap().to_path_buf(); // node/18.19.1/
+        let size = 16u64; // len of "fake binary data"
+        let candidates = CleanCandidates {
+            total_bytes: size,
+            entries: vec![CleanEntry {
+                label: "node@18.19.1".to_string(),
+                path: version_dir.clone(),
+                size,
+            }],
+        };
+
+        let freed = cache.remove_candidates(&candidates).unwrap();
+        assert!(freed > 0, "should have freed some bytes");
+        assert!(
+            !version_dir.exists(),
+            "version dir should have been removed"
+        );
+    }
+
+    #[test]
+    fn test_remove_candidates_empty_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::with_root(dir.path().to_path_buf());
+        let candidates = CleanCandidates::default();
+        let freed = cache.remove_candidates(&candidates).unwrap();
+        assert_eq!(freed, 0);
+    }
+
+    #[test]
+    fn test_remove_candidates_already_deleted_entry_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::with_root(dir.path().to_path_buf());
+        // Entry points to a path that doesn't exist — should not error
+        let candidates = CleanCandidates {
+            total_bytes: 100,
+            entries: vec![CleanEntry {
+                label: "node@99.0.0".to_string(),
+                path: dir.path().join("nonexistent"),
+                size: 100,
+            }],
+        };
+        let result = cache.remove_candidates(&candidates);
+        assert!(result.is_ok());
+    }
+
+    // --- dir_size ---
+
+    #[test]
+    fn test_dir_size_nonexistent_returns_zero() {
+        // dir_size silently skips unreadable dirs
+        let size = dir_size(std::path::Path::new("/nonexistent/path/abc"));
+        assert_eq!(size, 0);
+    }
+
+    #[test]
+    fn test_dir_size_with_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"world!").unwrap();
+        let size = dir_size(dir.path());
+        assert_eq!(size, 11); // 5 + 6 bytes
+    }
+
+    #[test]
+    fn test_dir_size_nested() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("data"), b"12345").unwrap();
+        let size = dir_size(dir.path());
+        assert_eq!(size, 5);
+    }
 }

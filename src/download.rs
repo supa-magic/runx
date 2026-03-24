@@ -237,7 +237,11 @@ pub async fn download_and_install(
     })?;
 
     // Determine archive filename from URL
-    let archive_name = url.rsplit('/').next().unwrap_or("archive.tar.gz");
+    let archive_name = url.rsplit('/').next().unwrap_or(match format {
+        ArchiveFormat::Zip => "archive.zip",
+        ArchiveFormat::TarXz => "archive.tar.xz",
+        ArchiveFormat::TarGz => "archive.tar.gz",
+    });
     let archive_path = temp_dir.path().join(archive_name);
 
     // Download
@@ -474,6 +478,98 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("output");
         let result = download_file("http://localhost:1/nonexistent", &dest, true).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_tar_gz_nonexistent_archive_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_archive(
+            std::path::Path::new("/nonexistent/archive.tar.gz"),
+            dir.path(),
+            ArchiveFormat::TarGz,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_zip_nonexistent_archive_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_archive(
+            std::path::Path::new("/nonexistent/archive.zip"),
+            dir.path(),
+            ArchiveFormat::Zip,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_zip_invalid_data_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("bad.zip");
+        std::fs::write(&archive_path, b"not a zip file").unwrap();
+        let extract_dir = dir.path().join("out");
+        std::fs::create_dir_all(&extract_dir).unwrap();
+
+        let result = extract_archive(&archive_path, &extract_dir, ArchiveFormat::Zip);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("failed to extract"));
+    }
+
+    #[test]
+    fn test_download_error_display_multiple() {
+        let err = DownloadError::Multiple {
+            errors: vec!["node: HTTP 404".to_string(), "python: timeout".to_string()],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("multiple download failures"));
+        assert!(msg.contains("node: HTTP 404"));
+        assert!(msg.contains("python: timeout"));
+    }
+
+    #[test]
+    fn test_download_error_display_extraction() {
+        let err = DownloadError::Extraction {
+            path: std::path::PathBuf::from("/tmp/archive.tar.gz"),
+            reason: "unexpected EOF".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("failed to extract"));
+        assert!(msg.contains("unexpected EOF"));
+    }
+
+    #[test]
+    fn test_verify_checksum_case_sensitive() {
+        // Checksums must match exactly — different case is a mismatch
+        assert!(verify_checksum("ABC123", "abc123").is_err());
+    }
+
+    #[test]
+    fn test_verify_checksum_empty_strings() {
+        assert!(verify_checksum("", "").is_ok());
+        assert!(verify_checksum("abc", "").is_err());
+        assert!(verify_checksum("", "abc").is_err());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_empty_src() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        std::fs::create_dir(&src).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+        assert!(dst.exists());
+        assert!(std::fs::read_dir(&dst).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_nonexistent_src_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("nonexistent");
+        let dst = dir.path().join("dst");
+        let result = copy_dir_recursive(&src, &dst);
         assert!(result.is_err());
     }
 }

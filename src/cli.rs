@@ -363,4 +363,59 @@ mod tests {
         };
         assert!(spec.version_spec().is_err());
     }
+
+    // --- ToolSpec Display ---
+
+    #[test]
+    fn test_tool_spec_display_with_semver_version() {
+        let spec = ToolSpec {
+            name: "go".to_string(),
+            version: Some("1.21.0".to_string()),
+        };
+        assert_eq!(spec.to_string(), "go@1.21.0");
+    }
+
+    #[test]
+    fn test_tool_spec_whitespace_trimmed() {
+        let spec: ToolSpec = "  node@18  ".parse().unwrap();
+        assert_eq!(spec.name, "node");
+        assert_eq!(spec.version.as_deref(), Some("18"));
+    }
+
+    // --- HumanDuration: exact boundary ---
+
+    #[test]
+    fn test_duration_24h_rounds_to_1_day() {
+        let d: HumanDuration = "24h".parse().unwrap();
+        assert_eq!(d.days, 1);
+    }
+
+    #[test]
+    fn test_duration_1h_rounds_to_1_day() {
+        let d: HumanDuration = "1h".parse().unwrap();
+        assert_eq!(d.days, 1);
+    }
+
+    #[test]
+    fn test_duration_display_shows_days() {
+        let d: HumanDuration = "48h".parse().unwrap();
+        assert_eq!(d.to_string(), "2d");
+    }
+
+    #[test]
+    fn test_duration_0d_is_valid() {
+        let d: HumanDuration = "0d".parse().unwrap();
+        assert_eq!(d.days, 0);
+    }
+
+    #[test]
+    fn test_duration_invalid_number_in_days() {
+        assert!("abcd".parse::<HumanDuration>().is_err());
+        assert!("-1d".parse::<HumanDuration>().is_err());
+    }
+
+    #[test]
+    fn test_duration_invalid_number_in_hours() {
+        assert!("xyzh".parse::<HumanDuration>().is_err());
+    }
 }

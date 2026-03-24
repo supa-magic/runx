@@ -5,11 +5,9 @@ use crate::platform::{Arch, Platform, Target};
 use crate::version::VersionSpec;
 
 use super::{
-    ArchiveFormat, Provider, ProviderError, collect_stable_versions, fetch_json,
+    ArchiveFormat, Provider, ProviderError, fetch_json, parse_github_releases,
     resolve_from_candidates,
 };
-
-use super::SimpleGitHubRelease as GitHubRelease;
 
 /// Bun tool provider.
 ///
@@ -30,23 +28,7 @@ impl BunProvider {
 
     /// Parse GitHub releases JSON into a list of stable Bun versions.
     fn parse_releases(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
-        let releases: Vec<GitHubRelease> =
-            serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
-                tool: "bun".to_string(),
-                reason: format!("failed to parse releases: {e}"),
-            })?;
-
-        let versions =
-            collect_stable_versions(releases.iter().map(|r| Self::parse_tag(&r.tag_name)));
-
-        if versions.is_empty() {
-            return Err(ProviderError::ResolutionFailed {
-                tool: "bun".to_string(),
-                reason: "no stable versions found in releases".to_string(),
-            });
-        }
-
-        Ok(versions)
+        parse_github_releases(json, "bun", Self::parse_tag)
     }
 
     /// Parse a Bun release tag like "bun-v1.0.25" into a semver Version.

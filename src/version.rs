@@ -283,4 +283,76 @@ mod tests {
         let candidates: Vec<semver::Version> = vec![];
         assert_eq!(VersionSpec::Latest.resolve(&candidates), None);
     }
+
+    // --- Parse edge cases ---
+
+    #[test]
+    fn test_parse_major_zero() {
+        // Edge: zero major is valid
+        assert_eq!("0".parse::<VersionSpec>().unwrap(), VersionSpec::Major(0));
+    }
+
+    #[test]
+    fn test_parse_major_minor_zero_minor() {
+        assert_eq!(
+            "18.0".parse::<VersionSpec>().unwrap(),
+            VersionSpec::MajorMinor(18, 0)
+        );
+    }
+
+    #[test]
+    fn test_parse_invalid_major_negative() {
+        // Negative number cannot parse as u64
+        assert!("-1".parse::<VersionSpec>().is_err());
+    }
+
+    #[test]
+    fn test_parse_invalid_major_minor_non_numeric_minor() {
+        assert!("18.abc".parse::<VersionSpec>().is_err());
+    }
+
+    #[test]
+    fn test_parse_invalid_major_minor_non_numeric_major() {
+        assert!("abc.1".parse::<VersionSpec>().is_err());
+    }
+
+    // --- Matching edge cases ---
+
+    #[test]
+    fn test_exact_does_not_match_different_build_metadata() {
+        // semver::Version PartialEq considers build metadata, so these are not equal
+        let spec = VersionSpec::Exact(v("1.0.0"));
+        let with_meta = semver::Version::parse("1.0.0+build.1").unwrap();
+        assert!(!spec.matches(&with_meta));
+    }
+
+    #[test]
+    fn test_major_does_not_match_lower_major() {
+        let spec = VersionSpec::Major(18);
+        assert!(!spec.matches(&v("17.99.99")));
+        assert!(!spec.matches(&v("19.0.0")));
+    }
+
+    #[test]
+    fn test_major_minor_does_not_match_different_minor() {
+        let spec = VersionSpec::MajorMinor(3, 11);
+        assert!(!spec.matches(&v("3.10.9")));
+        assert!(!spec.matches(&v("3.12.0")));
+    }
+
+    // --- Resolve with single candidate ---
+
+    #[test]
+    fn test_resolve_single_candidate_matches() {
+        let candidates = vec![v("18.0.0")];
+        let spec = VersionSpec::Major(18);
+        assert_eq!(spec.resolve(&candidates), Some(&v("18.0.0")));
+    }
+
+    #[test]
+    fn test_resolve_exact_single_non_matching() {
+        let candidates = vec![v("18.0.0")];
+        let spec = VersionSpec::Exact(v("18.0.1"));
+        assert_eq!(spec.resolve(&candidates), None);
+    }
 }

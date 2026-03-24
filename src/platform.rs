@@ -333,4 +333,50 @@ mod tests {
             ArchiveFormat::Zip
         );
     }
+
+    // --- Target::triple ---
+
+    #[test]
+    fn test_target_triple_macos_arm64() {
+        let t = Target::new(Platform::MacOS, Arch::Aarch64);
+        assert_eq!(t.triple(), "aarch64-apple-darwin");
+    }
+
+    #[test]
+    fn test_target_triple_macos_x64() {
+        let t = Target::new(Platform::MacOS, Arch::X86_64);
+        assert_eq!(t.triple(), "x86_64-apple-darwin");
+    }
+
+    #[test]
+    fn test_target_triple_linux_x64() {
+        let t = Target::new(Platform::Linux, Arch::X86_64);
+        assert_eq!(t.triple(), "x86_64-unknown-linux-gnu");
+    }
+
+    #[test]
+    fn test_target_triple_linux_arm64() {
+        let t = Target::new(Platform::Linux, Arch::Aarch64);
+        assert_eq!(t.triple(), "aarch64-unknown-linux-gnu");
+    }
+
+    #[test]
+    fn test_target_triple_windows_x64() {
+        let t = Target::new(Platform::Windows, Arch::X86_64);
+        assert_eq!(t.triple(), "x86_64-pc-windows-msvc");
+    }
+
+    #[test]
+    fn test_target_triple_windows_arm64() {
+        let t = Target::new(Platform::Windows, Arch::Aarch64);
+        assert_eq!(t.triple(), "aarch64-pc-windows-msvc");
+    }
+
+    // --- Target cache_dir_name for all platforms ---
+
+    #[test]
+    fn test_target_cache_dir_name_linux_arm64() {
+        let t = Target::new(Platform::Linux, Arch::Aarch64);
+        assert_eq!(t.cache_dir_name(), "linux-arm64");
+    }
 }

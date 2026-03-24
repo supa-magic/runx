@@ -72,7 +72,6 @@ fn default_bin_path() -> String {
 
 impl PluginManifest {
     /// Expand placeholders in a template string.
-    /// Expand placeholders in a template string.
     ///
     /// Available placeholders:
     /// - `{version}` — exact semver (e.g., `1.84.0`)
@@ -82,6 +81,8 @@ impl PluginManifest {
     /// - `{arch}` — full arch name (e.g., `aarch64`, `x86_64`)
     /// - `{arch_alt}` — short arch name (e.g., `arm64`, `x64`)
     fn expand(&self, template: &str, version: &semver::Version, target: &Target) -> String {
+        // Order matters: expand longer `{os_alt}` before `{os}` (and `{arch_alt}` before
+        // `{arch}`) so the shorter placeholder doesn't match inside the longer one's name.
         template
             .replace("{version}", &version.to_string())
             .replace("{triple}", target.triple())
@@ -229,13 +230,9 @@ pub fn run_plugin_command(action: &str, arg: Option<&str>) -> Result<(), RunxErr
             ))?;
             remove_plugin(name)
         }
-        _ => {
-            eprintln!("Unknown plugin command: {action}");
-            eprintln!("  runx plugin list              Show installed plugins");
-            eprintln!("  runx plugin add <path>        Install a plugin from a .toml file");
-            eprintln!("  runx plugin remove <name>     Remove a plugin");
-            Ok(())
-        }
+        _ => Err(RunxError::Plugin(format!(
+            "unknown plugin command: {action}\n  runx plugin list              Show installed plugins\n  runx plugin add <path>        Install a plugin from a .toml file\n  runx plugin remove <name>     Remove a plugin"
+        ))),
     }
 }
 
@@ -268,8 +265,7 @@ fn list_plugins() -> Result<(), RunxError> {
 fn add_plugin(source: &str) -> Result<(), RunxError> {
     let source_path = Path::new(source);
     if !source_path.is_file() {
-        eprintln!("File not found: {source}");
-        return Ok(());
+        return Err(RunxError::Plugin(format!("file not found: {source}")));
     }
 
     // Validate the manifest
@@ -537,5 +533,231 @@ download_url = "https://example.com/{version}/tool.tar.gz"
                 .post_install_command(&version, &target, Path::new("/cache"))
                 .is_none()
         );
+    }
+
+    // --- PluginProvider::resolve_version: non-exact spec is rejected ---
+
+    #[test]
+    fn test_plugin_provider_resolve_version_latest_returns_error() {
+        let manifest = PluginManifest {
+            name: "zig".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let provider = PluginProvider { manifest };
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::X86_64,
+        );
+        let result = provider.resolve_version(&crate::version::VersionSpec::Latest, &target);
+        assert!(
+            result.is_err(),
+            "plugin provider must reject non-exact specs"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("exact version"),
+            "error should mention exact version: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_plugin_provider_resolve_version_major_returns_error() {
+        let manifest = PluginManifest {
+            name: "zig".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let provider = PluginProvider { manifest };
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::X86_64,
+        );
+        let result = provider.resolve_version(&crate::version::VersionSpec::Major(1), &target);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_plugin_provider_resolve_version_exact_returns_ok() {
+        let manifest = PluginManifest {
+            name: "zig".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let provider = PluginProvider { manifest };
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::X86_64,
+        );
+        let spec = crate::version::VersionSpec::Exact(semver::Version::new(0, 12, 0));
+        let version = provider.resolve_version(&spec, &target).unwrap();
+        assert_eq!(version, semver::Version::new(0, 12, 0));
+    }
+
+    // --- PluginProvider::env_vars is always empty ---
+
+    #[test]
+    fn test_plugin_provider_env_vars_always_empty() {
+        let manifest = PluginManifest {
+            name: "zig".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: String::new(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let provider = PluginProvider { manifest };
+        assert!(
+            provider.env_vars(Path::new("/some/dir")).is_empty(),
+            "plugin provider should not inject env vars"
+        );
+    }
+
+    // --- PluginManifest::expand: {triple}, {os_alt}, {arch_alt} placeholders ---
+
+    #[test]
+    fn test_plugin_expand_triple_placeholder() {
+        let manifest = PluginManifest {
+            name: "rust".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: "https://example.com/{triple}/tool.tar.gz".to_string(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let version = semver::Version::new(1, 0, 0);
+        let target = Target::new(
+            crate::platform::Platform::MacOS,
+            crate::platform::Arch::Aarch64,
+        );
+        let url = manifest.expand(&manifest.download_url, &version, &target);
+        assert_eq!(url, "https://example.com/aarch64-apple-darwin/tool.tar.gz");
+    }
+
+    #[test]
+    fn test_plugin_expand_os_alt_placeholder() {
+        let manifest = PluginManifest {
+            name: "tool".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: "https://example.com/{os_alt}/tool.tar.gz".to_string(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let version = semver::Version::new(1, 0, 0);
+        let target = Target::new(
+            crate::platform::Platform::MacOS,
+            crate::platform::Arch::X86_64,
+        );
+        let url = manifest.expand(&manifest.download_url, &version, &target);
+        assert!(
+            url.contains("darwin"),
+            "os_alt for macOS should be 'darwin': {url}"
+        );
+    }
+
+    #[test]
+    fn test_plugin_expand_arch_alt_placeholder() {
+        let manifest = PluginManifest {
+            name: "tool".to_string(),
+            aliases: vec![],
+            description: String::new(),
+            download_url: "https://example.com/{arch_alt}/tool.tar.gz".to_string(),
+            archive_format: "tar.gz".to_string(),
+            bin_path: "bin".to_string(),
+            interpreter: vec![],
+            post_install: None,
+            post_install_timeout: 300,
+        };
+        let version = semver::Version::new(1, 0, 0);
+        let target = Target::new(
+            crate::platform::Platform::Linux,
+            crate::platform::Arch::Aarch64,
+        );
+        let url = manifest.expand(&manifest.download_url, &version, &target);
+        assert!(
+            url.contains("arm64"),
+            "arch_alt for aarch64 should be 'arm64': {url}"
+        );
+    }
+
+    // --- run_plugin_command: unknown action ---
+
+    #[test]
+    fn test_run_plugin_command_unknown_action() {
+        let result = run_plugin_command("unknown-action", None);
+        // Unknown actions return an error with usage information
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("unknown plugin command"),
+            "error should describe the unknown command: {msg}"
+        );
+    }
+
+    // --- run_plugin_command: add with no arg returns error ---
+
+    #[test]
+    fn test_run_plugin_command_add_no_arg_returns_error() {
+        let result = run_plugin_command("add", None);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("usage"));
+    }
+
+    #[test]
+    fn test_run_plugin_command_remove_no_arg_returns_error() {
+        let result = run_plugin_command("remove", None);
+        assert!(result.is_err());
+    }
+
+    // --- add_plugin: file not found ---
+
+    #[test]
+    fn test_add_plugin_file_not_found() {
+        let result = add_plugin("/nonexistent/path/plugin.toml");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("file not found"));
+    }
+
+    // --- add_plugin: invalid manifest ---
+
+    #[test]
+    fn test_add_plugin_invalid_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad_toml = dir.path().join("bad.toml");
+        std::fs::write(&bad_toml, "not valid toml [[[").unwrap();
+        let result = add_plugin(bad_toml.to_str().unwrap());
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("invalid plugin manifest") || msg.contains("plugin error"));
     }
 }

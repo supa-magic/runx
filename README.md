@@ -273,7 +273,7 @@ runx plugin list                          # See installed plugins
 runx plugin remove zig                    # Uninstall
 ```
 
-Placeholders `{version}`, `{os}`, `{arch}` are expanded automatically. Share plugin files with your team or the community.
+Placeholders `{version}`, `{os}`, `{arch}`, `{triple}`, `{os_alt}`, `{arch_alt}` are expanded automatically. Share plugin files with your team or the community.
 
 ---
 
@@ -355,7 +355,7 @@ OPTIONS:
 
 ```bash
 git clone https://github.com/supa-magic/runx.git && cd runx
-cargo test                    # 338 tests
+cargo test                    # 343 tests
 cargo clippy                  # Zero warnings policy
 cargo fmt --check             # Enforced formatting
 ```

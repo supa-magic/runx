@@ -125,28 +125,64 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
     let target = Target::detect().map_err(RunxError::UnsupportedPlatform)?;
     let cache = Cache::new()?;
 
-    // Phase 1: Resolve all tools sequentially (version resolution uses blocking HTTP)
-    let mut resolved_tools = Vec::new();
+    let resolved_tools = resolve_tools(cli, &cache, &target)?;
+
+    if cli.dry_run {
+        eprintln!("Would execute: {:?}", cli.cmd);
+        return Ok(());
+    }
+
+    download_uncached(&resolved_tools, cli.quiet).await?;
+    run_post_install_hooks(&resolved_tools, &target, cli.quiet).await?;
+
+    let mut temp_dirs = TempDirs::new();
+    let environment = build_environment(
+        &resolved_tools,
+        &target,
+        &mut temp_dirs,
+        cli.inherit_env,
+        cli.quiet,
+    )?;
+
+    let (program, args) = resolve_script_command(&cli.cmd, &cli.tools);
+    let status = executor::execute(&program, &args, environment.vars())?;
+
+    drop(temp_dirs);
+
+    let code = executor::exit_code(&status);
+    if code != 0 {
+        return Err(RunxError::ProcessExited(code));
+    }
+
+    Ok(())
+}
+
+/// Resolve all tool specs to exact versions, checking the cache for each.
+fn resolve_tools(
+    cli: &Cli,
+    cache: &Cache,
+    target: &Target,
+) -> Result<Vec<ResolvedTool>, RunxError> {
+    let mut resolved = Vec::new();
     for tool_spec in &cli.tools {
         let provider = provider::get_provider(&tool_spec.name)?;
-
         let version_spec = tool_spec.version_spec()?;
 
         if !cli.quiet {
             eprintln!("Resolving {}@{}...", tool_spec.name, version_spec);
         }
 
-        let version = provider.resolve_version(&version_spec, &target)?;
+        let version = provider.resolve_version(&version_spec, target)?;
 
         if !cli.quiet {
             eprintln!("Resolved {} → {}", tool_spec.name, version);
         }
 
-        let cached = cache.is_cached(provider.name(), &version, &target);
-        let install_dir = cache.install_path(provider.name(), &version, &target);
+        let cached = cache.is_cached(provider.name(), &version, target);
+        let install_dir = cache.install_path(provider.name(), &version, target);
 
         let download_url = if !cached {
-            let url = provider.download_url(&version, &target)?;
+            let url = provider.download_url(&version, target)?;
             if cli.dry_run {
                 eprintln!("Would download: {url}");
                 eprintln!("Would install to: {}", install_dir.display());
@@ -159,9 +195,9 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
             None
         };
 
-        let archive_format = provider.archive_format(&target);
+        let archive_format = provider.archive_format(target);
 
-        resolved_tools.push(ResolvedTool {
+        resolved.push(ResolvedTool {
             name: tool_spec.name.clone(),
             version,
             provider,
@@ -171,124 +207,125 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
             install_dir,
         });
     }
+    Ok(resolved)
+}
 
-    if cli.dry_run {
-        eprintln!("Would execute: {:?}", cli.cmd);
+/// Download all uncached tools in parallel.
+async fn download_uncached(tools: &[ResolvedTool], quiet: bool) -> Result<(), RunxError> {
+    let downloads: Vec<_> = tools.iter().filter(|t| !t.cached).collect();
+
+    if downloads.is_empty() {
         return Ok(());
     }
 
-    // Phase 2: Download all uncached tools in parallel
-    let downloads: Vec<_> = resolved_tools
-        .iter()
-        .filter(|t| !t.cached)
-        .collect::<Vec<_>>();
+    if !quiet && downloads.len() > 1 {
+        eprintln!("Downloading {} tools in parallel...", downloads.len());
+    }
 
-    if !downloads.is_empty() {
-        if !cli.quiet && downloads.len() > 1 {
-            eprintln!("Downloading {} tools in parallel...", downloads.len());
-        }
+    let mut join_set = tokio::task::JoinSet::new();
 
-        let mut join_set = tokio::task::JoinSet::new();
+    for tool in &downloads {
+        let url = tool.download_url.clone().ok_or_else(|| {
+            RunxError::Plugin(format!(
+                "internal error: uncached tool `{}` has no download URL",
+                tool.name
+            ))
+        })?;
+        let install_dir = tool.install_dir.clone();
+        let format = tool.archive_format;
+        let name = tool.name.clone();
 
-        for tool in &downloads {
-            let url = tool.download_url.clone().expect("uncached tool has URL");
-            let install_dir = tool.install_dir.clone();
-            let format = tool.archive_format;
-            let quiet = cli.quiet;
-            let name = tool.name.clone();
-
-            join_set.spawn(async move {
-                if !quiet {
-                    eprintln!("Downloading {name}...");
-                }
-                let result = download_and_install(&url, &install_dir, format, None, quiet).await;
-                if !quiet && result.is_ok() {
-                    eprintln!("Installed {name}");
-                }
-                (name, result)
-            });
-        }
-
-        // Collect results — report all errors, not just the first
-        let mut errors = Vec::new();
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok((name, Err(e))) => errors.push(format!("{name}: {e}")),
-                Err(e) => errors.push(format!("task failed: {e}")),
-                Ok((_, Ok(()))) => {}
+        join_set.spawn(async move {
+            if !quiet {
+                eprintln!("Downloading {name}...");
             }
-        }
+            let result = download_and_install(&url, &install_dir, format, None, quiet).await;
+            if !quiet && result.is_ok() {
+                eprintln!("Installed {name}");
+            }
+            (name, result)
+        });
+    }
 
-        if !errors.is_empty() {
-            return Err(RunxError::Download(
-                crate::download::DownloadError::Multiple { errors },
-            ));
+    let mut errors = Vec::new();
+    while let Some(result) = join_set.join_next().await {
+        match result {
+            Ok((name, Err(e))) => errors.push(format!("{name}: {e}")),
+            Err(e) => errors.push(format!("task failed: {e}")),
+            Ok((_, Ok(()))) => {}
         }
     }
 
-    // Phase 2b: Run post-install hooks for freshly downloaded tools
-    for tool in &resolved_tools {
+    if !errors.is_empty() {
+        return Err(RunxError::Download(
+            crate::download::DownloadError::Multiple { errors },
+        ));
+    }
+
+    Ok(())
+}
+
+/// Run post-install hooks for freshly downloaded tools.
+async fn run_post_install_hooks(
+    tools: &[ResolvedTool],
+    target: &Target,
+    quiet: bool,
+) -> Result<(), RunxError> {
+    for tool in tools {
         if !tool.cached
             && let Some(cmd) =
                 tool.provider
-                    .post_install_command(&tool.version, &target, &tool.install_dir)
+                    .post_install_command(&tool.version, target, &tool.install_dir)
         {
-            if !cli.quiet {
+            if !quiet {
                 eprintln!("Running post-install for {}...", tool.name);
             }
-            run_post_install(&cmd, &tool.install_dir, &tool.name)?;
+            let install_dir = tool.install_dir.clone();
+            let name = tool.name.clone();
+            tokio::task::spawn_blocking(move || run_post_install(&cmd, &install_dir, &name))
+                .await
+                .map_err(|e| RunxError::Plugin(format!("post-install task failed: {e}")))??;
         }
     }
+    Ok(())
+}
 
-    // Phase 3: Collect bin paths, env vars, and temp dirs
+/// Collect bin paths, env vars, and temp dirs from resolved tools into an Environment.
+fn build_environment(
+    tools: &[ResolvedTool],
+    target: &Target,
+    temp_dirs: &mut TempDirs,
+    inherit_env: bool,
+    quiet: bool,
+) -> Result<Environment, RunxError> {
     let mut all_bin_dirs: Vec<PathBuf> = Vec::new();
     let mut all_tool_env_vars: HashMap<String, String> = HashMap::new();
-    let mut temp_dirs = TempDirs::new();
 
-    for tool in &resolved_tools {
-        // Bin paths
-        let bin_paths = tool.provider.bin_paths(&tool.version, &target);
+    for tool in tools {
+        let bin_paths = tool.provider.bin_paths(&tool.version, target);
         for bin_path in &bin_paths {
             all_bin_dirs.push(tool.install_dir.join(bin_path));
         }
 
-        // Env vars
         let env_vars = tool.provider.env_vars(&tool.install_dir);
         all_tool_env_vars.extend(env_vars);
 
-        // Temp directories
         for env_var in tool.provider.temp_env_dirs() {
             let dir = temp_dirs.create(env_var)?;
-            if !cli.quiet {
+            if !quiet {
                 eprintln!("  {env_var}={}", dir.display());
             }
         }
     }
 
-    // Build isolated environment
     let temp_env_vars = temp_dirs.env_vars();
-    let environment = Environment::build(
+    Ok(Environment::build(
         target.platform,
         &all_bin_dirs,
         &all_tool_env_vars,
         &temp_env_vars,
-        cli.inherit_env,
-    );
-
-    // Shebang / script detection: if cmd[0] is a file path (not a binary name),
-    // infer the interpreter from the tool spec and prepend it.
-    let (program, args) = resolve_script_command(&cli.cmd, &cli.tools);
-
-    let status = executor::execute(&program, &args, environment.vars())?;
-
-    drop(temp_dirs);
-
-    let code = executor::exit_code(&status);
-    if code != 0 {
-        std::process::exit(code);
-    }
-
-    Ok(())
+        inherit_env,
+    ))
 }
 
 /// Run a post-install shell command in the given directory.
@@ -300,23 +337,29 @@ fn run_post_install(
     let shell = if cfg!(windows) { "cmd" } else { "sh" };
     let flag = if cfg!(windows) { "/c" } else { "-c" };
 
-    let status = std::process::Command::new(shell)
+    let output = std::process::Command::new(shell)
         .args([flag, command])
         .current_dir(install_dir)
-        .stdout(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
-        .status()
+        .output()
         .map_err(|e| {
             RunxError::Plugin(format!("post-install for {tool_name} failed to start: {e}"))
         })?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         // Clean up the install dir to prevent a corrupt cache entry
         let _ = std::fs::remove_dir_all(install_dir);
-        return Err(RunxError::Plugin(format!(
-            "post-install for {tool_name} failed with exit code {}.\n  Command: {command}\n  The install directory has been cleaned up.",
-            status.code().unwrap_or(-1)
-        )));
+        let mut msg = format!(
+            "post-install for {tool_name} failed with exit code {}.\n  Command: {command}",
+            output.status.code().unwrap_or(-1)
+        );
+        if !stderr.trim().is_empty() {
+            msg.push_str(&format!("\n  Output: {}", stderr.trim()));
+        }
+        msg.push_str("\n  The install directory has been cleaned up.");
+        return Err(RunxError::Plugin(msg));
     }
 
     Ok(())
@@ -337,17 +380,26 @@ fn tool_interpreter(tool_name: &str) -> Option<Vec<String>> {
     None
 }
 
+/// Check if a name matches any known built-in tool or alias.
+fn is_known_tool(name: &str) -> bool {
+    provider::TOOL_REGISTRY
+        .iter()
+        .any(|e| e.name == name || e.aliases.contains(&name))
+}
+
 /// Detect if cmd[0] is a script file and prepend the interpreter if needed.
 ///
 /// When runx is invoked via shebang (`#!/usr/bin/env -S runx --with node@22 --`),
 /// the kernel passes the script path as the first argument after `--`.
 /// This function detects that case and prepends the interpreter command.
 fn resolve_script_command(cmd: &[String], tools: &[crate::cli::ToolSpec]) -> (String, Vec<String>) {
-    debug_assert!(!cmd.is_empty(), "cmd must not be empty");
+    if cmd.is_empty() {
+        return (String::new(), Vec::new());
+    }
     let first = &cmd[0];
 
     // If cmd[0] is already a known tool binary, use it as-is
-    if provider::get_provider(first).is_ok() || !std::path::Path::new(first).is_file() {
+    if is_known_tool(first) || !std::path::Path::new(first).is_file() {
         return (first.clone(), cmd[1..].to_vec());
     }
 
@@ -577,5 +629,69 @@ mod tests {
             vec!["go", "run"]
         );
         assert_eq!(super::tool_interpreter("bunx").unwrap(), vec!["bun", "run"]);
+    }
+
+    // --- run_post_install ---
+
+    #[test]
+    fn test_run_post_install_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = super::run_post_install("true", dir.path(), "test-tool");
+        assert!(
+            result.is_ok(),
+            "successful post-install command should return Ok"
+        );
+    }
+
+    #[test]
+    fn test_run_post_install_failure_returns_error_and_cleans_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        std::fs::create_dir_all(&install_dir).unwrap();
+
+        // exit 1 causes post-install failure and cleanup
+        let result = super::run_post_install("exit 1", &install_dir, "test-tool");
+        assert!(result.is_err(), "failing post-install should return Err");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("test-tool"),
+            "error should mention tool name: {msg}"
+        );
+        // Install dir should have been removed on failure
+        assert!(
+            !install_dir.exists(),
+            "install dir should be cleaned up after post-install failure"
+        );
+    }
+
+    #[test]
+    fn test_run_post_install_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = format!("touch {}/marker", dir.path().display());
+        let result = super::run_post_install(&cmd, dir.path(), "test-tool");
+        assert!(result.is_ok());
+        assert!(
+            dir.path().join("marker").exists(),
+            "marker file should have been created by post-install command"
+        );
+    }
+
+    // --- resolve_script_command: golang alias uses go run ---
+
+    #[test]
+    fn test_resolve_script_command_real_file_golang_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("main.go");
+        std::fs::write(&script, "package main").unwrap();
+
+        let cmd = vec![script.to_string_lossy().to_string()];
+        let tools = vec![crate::cli::ToolSpec {
+            name: "golang".to_string(),
+            version: None,
+        }];
+        let (program, args) = super::resolve_script_command(&cmd, &tools);
+        assert_eq!(program, "go");
+        assert_eq!(args[0], "run");
+        assert_eq!(args[1], script.to_string_lossy().as_ref());
     }
 }

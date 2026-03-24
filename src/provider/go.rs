@@ -16,18 +16,6 @@ use super::{
 struct GoVersion {
     version: String,
     stable: bool,
-    #[allow(unused)]
-    files: Vec<GoFile>,
-}
-
-/// Go download file entry (parsed for serde completeness).
-#[derive(Debug, Deserialize)]
-#[allow(unused)]
-struct GoFile {
-    filename: String,
-    os: String,
-    arch: String,
-    kind: String,
 }
 
 /// Go tool provider.

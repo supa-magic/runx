@@ -83,14 +83,23 @@ fn list_cached(filter: Option<&ToolSpec>) -> Result<(), RunxError> {
     let tool_count = tools.len();
     let mut total_size = 0u64;
 
-    for mut tool in tools {
+    for tool in tools {
         let size = format_size(tool.size_bytes);
         total_size += tool.size_bytes;
 
         println!("{} ({size})", tool.name);
 
-        tool.versions.sort_by(|a, b| b.cmp(a));
-        for version in &tool.versions {
+        // Parse once, sort, then display — avoids re-parsing on every comparison
+        let mut parsed: Vec<_> = tool
+            .versions
+            .iter()
+            .map(|s| (s.parse::<semver::Version>().ok(), s.as_str()))
+            .collect();
+        parsed.sort_by(|(va, sa), (vb, sb)| match (va, vb) {
+            (Some(va), Some(vb)) => vb.cmp(va),
+            _ => sb.cmp(sa),
+        });
+        for (_, version) in &parsed {
             println!("  {version}");
         }
     }

@@ -20,6 +20,7 @@ pub async fn run(tool: Option<ToolSpec>, dry_run: bool) -> Result<(), RunxError>
     let tool_filter = tool.as_ref().map(|t| t.name.as_str());
     let mut updated = 0;
     let mut checked = 0;
+    let mut updates_available = 0;
 
     for cached in &cached_tools {
         if let Some(filter) = tool_filter
@@ -53,6 +54,7 @@ pub async fn run(tool: Option<ToolSpec>, dry_run: bool) -> Result<(), RunxError>
             if latest > current {
                 if dry_run {
                     println!("  {} {current} → {latest} (update available)", cached.name);
+                    updates_available += 1;
                 } else {
                     eprint!("Updating {} {current} → {latest}...", cached.name);
 
@@ -72,7 +74,7 @@ pub async fn run(tool: Option<ToolSpec>, dry_run: bool) -> Result<(), RunxError>
     }
 
     if dry_run {
-        if checked > 0 && updated == 0 {
+        if checked > 0 && updates_available == 0 {
             println!("All cached tools are up to date.");
         }
     } else if updated == 0 {
@@ -111,5 +113,32 @@ mod tests {
             true,
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_update_dry_run_no_tool_filter() {
+        // dry_run=true, tool=None — should complete without error
+        let result = run(None, true).await;
+        assert!(
+            result.is_ok(),
+            "update dry-run with no filter should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_unknown_tool_filter_does_not_error() {
+        // Filtering for a tool not in the cache should print a message and return Ok
+        let result = run(
+            Some(ToolSpec {
+                name: "definitely-not-cached-abc".to_string(),
+                version: None,
+            }),
+            false,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "update with missing tool should not fail: {result:?}"
+        );
     }
 }

@@ -190,6 +190,7 @@ impl Environment {
 
     /// Construct a PATH string from tool bin dirs and a base path.
     fn build_path(tool_bin_dirs: &[PathBuf], base_path: &str, sep: char) -> String {
+        let sep_str = if sep == ';' { ";" } else { ":" };
         let mut parts: Vec<String> = tool_bin_dirs
             .iter()
             .map(|p| p.to_string_lossy().to_string())
@@ -197,7 +198,7 @@ impl Environment {
         if !base_path.is_empty() {
             parts.push(base_path.to_string());
         }
-        parts.join(&sep.to_string())
+        parts.join(sep_str)
     }
 }
 
@@ -449,13 +450,10 @@ mod tests {
 
     #[test]
     fn test_isolated_inherits_lc_and_xdg_prefixes() {
-        // SAFETY for env mutation: use unique var names to avoid test pollution
-        unsafe {
-            std::env::set_var("LC_RUNX_TEST", "en_US.UTF-8");
-            std::env::set_var("XDG_RUNX_TEST", "/run/user/1000");
-            std::env::set_var("RUNX_CUSTOM_SHOULD_NOT_INHERIT", "nope");
-        }
-
+        // These tests verify prefix-based inheritance by checking that existing
+        // LC_*/XDG_* vars from the process environment are inherited.
+        // We avoid mutating env vars (which is UB in multi-threaded tests)
+        // and instead just verify the filtering logic with whatever vars exist.
         let env = Environment::build(
             Platform::MacOS,
             &[],
@@ -464,26 +462,26 @@ mod tests {
             false,
         );
 
-        assert_eq!(env.vars().get("LC_RUNX_TEST").unwrap(), "en_US.UTF-8");
-        assert_eq!(env.vars().get("XDG_RUNX_TEST").unwrap(), "/run/user/1000");
-        assert!(!env.vars().contains_key("RUNX_CUSTOM_SHOULD_NOT_INHERIT"));
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("LC_RUNX_TEST");
-            std::env::remove_var("XDG_RUNX_TEST");
-            std::env::remove_var("RUNX_CUSTOM_SHOULD_NOT_INHERIT");
+        // Verify that any LC_* or XDG_* vars from the process env are inherited
+        for (key, value) in std::env::vars() {
+            if key.starts_with("LC_") || key.starts_with("XDG_") {
+                assert_eq!(
+                    env.vars().get(&key).unwrap(),
+                    &value,
+                    "{key} should be inherited"
+                );
+            }
         }
+
+        // Verify that non-baseline vars are NOT inherited
+        assert!(!env.vars().contains_key("NVM_DIR"));
+        assert!(!env.vars().contains_key("PYENV_ROOT"));
     }
 
     // --- Non-baseline exclusion with real env var ---
 
     #[test]
     fn test_isolated_excludes_non_baseline_vars() {
-        unsafe {
-            std::env::set_var("RUNX_TEST_EXCLUDE_ME", "should_not_appear");
-        }
-
         let env = Environment::build(
             Platform::MacOS,
             &[],
@@ -492,10 +490,16 @@ mod tests {
             false,
         );
 
-        assert!(!env.vars().contains_key("RUNX_TEST_EXCLUDE_ME"));
-
-        unsafe {
-            std::env::remove_var("RUNX_TEST_EXCLUDE_ME");
+        // Verify non-baseline vars are not in isolated env
+        // (these would only appear if the filter incorrectly inherited them)
+        for key in env.vars().keys() {
+            let is_path = key == "PATH";
+            let is_baseline = BASELINE_VARS.contains(&key.as_str());
+            let is_prefix = BASELINE_PREFIXES.iter().any(|p| key.starts_with(p));
+            assert!(
+                is_path || is_baseline || is_prefix,
+                "unexpected var {key} in isolated env"
+            );
         }
     }
 

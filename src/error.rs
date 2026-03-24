@@ -23,7 +23,6 @@ pub enum RunxError {
     NoTools,
 
     /// Platform detection failed.
-    #[allow(unused)]
     #[error("unsupported platform: {0}")]
     UnsupportedPlatform(String),
 
@@ -66,6 +65,10 @@ pub enum RunxError {
     /// A plugin operation error.
     #[error("plugin error: {0}")]
     Plugin(String),
+
+    /// Child process exited with a non-zero exit code.
+    #[error("process exited with code {0}")]
+    ProcessExited(i32),
 }
 
 #[cfg(test)]
@@ -141,5 +144,61 @@ mod tests {
         let err = RunxError::Plugin("missing manifest".to_string());
         assert!(err.to_string().contains("missing manifest"));
         assert!(err.to_string().contains("plugin error"));
+    }
+
+    #[test]
+    fn test_process_exited_display() {
+        let err = RunxError::ProcessExited(42);
+        assert_eq!(err.to_string(), "process exited with code 42");
+    }
+
+    #[test]
+    fn test_process_exited_zero_display() {
+        // Code 0 means success — but the type still formats correctly
+        let err = RunxError::ProcessExited(0);
+        assert_eq!(err.to_string(), "process exited with code 0");
+    }
+
+    #[test]
+    fn test_environment_error_converts() {
+        let err: RunxError = crate::environment::EnvironmentError::TempDir {
+            var: "GOPATH".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        }
+        .into();
+        assert!(matches!(err, RunxError::Environment(_)));
+        assert!(err.to_string().contains("GOPATH"));
+    }
+
+    #[test]
+    fn test_executor_error_converts() {
+        let err: RunxError = crate::executor::ExecutorError::Spawn {
+            program: "sh".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
+        }
+        .into();
+        assert!(matches!(err, RunxError::Executor(_)));
+        assert!(err.to_string().contains("sh"));
+    }
+
+    #[test]
+    fn test_download_error_converts() {
+        let err: RunxError = crate::download::DownloadError::ChecksumMismatch {
+            expected: "aaa".to_string(),
+            actual: "bbb".to_string(),
+        }
+        .into();
+        assert!(matches!(err, RunxError::Download(_)));
+        assert!(err.to_string().contains("checksum mismatch"));
+    }
+
+    #[test]
+    fn test_config_error_converts() {
+        let err: RunxError = crate::config::ConfigError::Parse {
+            path: std::path::PathBuf::from("/tmp/.runxrc"),
+            reason: "bad toml".to_string(),
+        }
+        .into();
+        assert!(matches!(err, RunxError::Config(_)));
     }
 }

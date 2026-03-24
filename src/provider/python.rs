@@ -13,15 +13,13 @@ use super::{
 };
 
 /// GitHub release entry from the python-build-standalone repository.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct GitHubRelease {
-    #[allow(unused)]
-    tag_name: String,
     assets: Vec<GitHubAsset>,
 }
 
 /// GitHub release asset.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
@@ -29,7 +27,6 @@ struct GitHubAsset {
 
 /// Cached releases to avoid duplicate HTTP requests within a single invocation.
 /// `resolve_version` and `download_url` both need the releases data.
-/// Cached releases to avoid duplicate HTTP requests.
 static CACHED_RELEASES: Mutex<Option<Vec<GitHubRelease>>> = Mutex::new(None);
 
 /// Python tool provider using python-build-standalone releases.
@@ -42,22 +39,28 @@ impl PythonProvider {
     const RELEASES_URL: &str =
         "https://api.github.com/repos/astral-sh/python-build-standalone/releases?per_page=30";
 
-    /// Get releases, fetching from GitHub only on the first call.
-    /// Caches the result in a static Mutex to avoid duplicate HTTP requests
-    /// when resolve_version and download_url are called in sequence.
-    fn get_releases() -> Result<Vec<GitHubRelease>, ProviderError> {
-        let mut cache = CACHED_RELEASES.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(releases) = cache.as_ref() {
-            return Ok(releases.clone());
-        }
-        let body = fetch_json(Self::RELEASES_URL, "python")?;
-        let releases: Vec<GitHubRelease> =
-            serde_json::from_str(&body).map_err(|e| ProviderError::ResolutionFailed {
+    /// Fetch releases from GitHub (or cache), then apply a function while holding the lock.
+    ///
+    /// This avoids cloning the entire releases Vec on every access.
+    fn with_releases<T>(
+        f: impl FnOnce(&[GitHubRelease]) -> Result<T, ProviderError>,
+    ) -> Result<T, ProviderError> {
+        let mut cache = CACHED_RELEASES
+            .lock()
+            .map_err(|_| ProviderError::ResolutionFailed {
                 tool: "python".to_string(),
-                reason: format!("failed to parse releases: {e}"),
+                reason: "internal cache lock poisoned".to_string(),
             })?;
-        *cache = Some(releases.clone());
-        Ok(releases)
+        if cache.is_none() {
+            let body = fetch_json(Self::RELEASES_URL, "python")?;
+            let releases: Vec<GitHubRelease> =
+                serde_json::from_str(&body).map_err(|e| ProviderError::ResolutionFailed {
+                    tool: "python".to_string(),
+                    reason: format!("failed to parse releases: {e}"),
+                })?;
+            *cache = Some(releases);
+        }
+        f(cache.as_ref().unwrap())
     }
 
     /// Extract available Python versions from parsed releases (for testing).
@@ -147,15 +150,16 @@ impl Provider for PythonProvider {
         spec: &VersionSpec,
         _target: &Target,
     ) -> Result<semver::Version, ProviderError> {
-        let releases = Self::get_releases()?;
-        let versions = Self::versions_from_releases(&releases);
-        if versions.is_empty() {
-            return Err(ProviderError::ResolutionFailed {
-                tool: "python".to_string(),
-                reason: "no Python versions found".to_string(),
-            });
-        }
-        resolve_from_candidates(&versions, spec, "python")
+        Self::with_releases(|releases| {
+            let versions = Self::versions_from_releases(releases);
+            if versions.is_empty() {
+                return Err(ProviderError::ResolutionFailed {
+                    tool: "python".to_string(),
+                    reason: "no Python versions found".to_string(),
+                });
+            }
+            resolve_from_candidates(&versions, spec, "python")
+        })
     }
 
     fn download_url(
@@ -163,8 +167,7 @@ impl Provider for PythonProvider {
         version: &semver::Version,
         target: &Target,
     ) -> Result<String, ProviderError> {
-        let releases = Self::get_releases()?;
-        Self::find_url_in_releases(&releases, version, target)
+        Self::with_releases(|releases| Self::find_url_in_releases(releases, version, target))
     }
 
     fn archive_format(&self, _target: &Target) -> ArchiveFormat {
@@ -312,7 +315,6 @@ mod tests {
     #[test]
     fn test_find_url_macos_arm64() {
         let releases = vec![GitHubRelease {
-            tag_name: "20240224".to_string(),
             assets: vec![GitHubAsset {
                 name: "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz"
                     .to_string(),
@@ -327,7 +329,6 @@ mod tests {
     #[test]
     fn test_find_url_not_found() {
         let releases = vec![GitHubRelease {
-            tag_name: "20240224".to_string(),
             assets: vec![GitHubAsset {
                 name: "cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz"
                     .to_string(),
@@ -342,7 +343,6 @@ mod tests {
     #[test]
     fn test_find_url_ignores_sha256() {
         let releases = vec![GitHubRelease {
-            tag_name: "20240224".to_string(),
             assets: vec![
                 GitHubAsset {
                     name: "cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz.sha256".to_string(),

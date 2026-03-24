@@ -24,6 +24,9 @@ use cli::Cli;
 async fn main() {
     let cli = Cli::parse();
     if let Err(e) = run::run(cli).await {
+        if let error::RunxError::ProcessExited(code) = e {
+            std::process::exit(code);
+        }
         eprintln!("error: {e}");
         std::process::exit(1);
     }

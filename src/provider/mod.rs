@@ -83,15 +83,18 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
 ///
 /// Uses `tokio::task::block_in_place` to bridge blocking `reqwest` into
 /// the tokio runtime. All providers use this to avoid duplicating HTTP logic.
-pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
-    tokio::task::block_in_place(|| {
+/// Shared HTTP client, constructed once and reused across all fetch calls.
+static HTTP_CLIENT: std::sync::LazyLock<reqwest::blocking::Client> =
+    std::sync::LazyLock::new(|| {
         reqwest::blocking::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
-            .map_err(|e| ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("{e:#}"),
-            })?
+            .expect("failed to build HTTP client")
+    });
+
+pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
+    tokio::task::block_in_place(|| {
+        let response = HTTP_CLIENT
             .get(url)
             .header("User-Agent", "runx")
             .header("Accept", "application/json")
@@ -99,7 +102,17 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
             .map_err(|e| ProviderError::ResolutionFailed {
                 tool: tool.to_string(),
                 reason: format!("{e:#}"),
-            })?
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ProviderError::ResolutionFailed {
+                tool: tool.to_string(),
+                reason: format!("HTTP {status} from {url}"),
+            });
+        }
+
+        response
             .text()
             .map_err(|e| ProviderError::ResolutionFailed {
                 tool: tool.to_string(),
@@ -131,6 +144,32 @@ pub fn collect_stable_versions(
         }
     }
     result
+}
+
+/// Parse GitHub releases JSON and extract stable versions using a tag-to-version parser.
+///
+/// Shared by providers that use GitHub releases (Deno, Bun) with different tag formats.
+pub fn parse_github_releases(
+    json: &str,
+    tool: &'static str,
+    parse_tag: impl Fn(&str) -> Option<semver::Version>,
+) -> Result<Vec<semver::Version>, ProviderError> {
+    let releases: Vec<SimpleGitHubRelease> =
+        serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
+            tool: tool.to_string(),
+            reason: format!("failed to parse releases: {e}"),
+        })?;
+
+    let versions = collect_stable_versions(releases.iter().map(|r| parse_tag(&r.tag_name)));
+
+    if versions.is_empty() {
+        return Err(ProviderError::ResolutionFailed {
+            tool: tool.to_string(),
+            reason: "no stable versions found in releases".to_string(),
+        });
+    }
+
+    Ok(versions)
 }
 
 /// Resolve a version spec against a list of candidates.
@@ -238,7 +277,6 @@ pub enum ProviderError {
     VersionNotFound { tool: String, spec: String },
 
     /// The tool does not support this platform/architecture combination.
-    #[allow(unused)]
     #[error(
         "{tool} does not support target `{target}`.\n  Run `runx list {tool}` to see supported platforms."
     )]
@@ -414,5 +452,134 @@ mod tests {
                 .env_vars(std::path::Path::new("/tmp/dummy"))
                 .contains_key("DUMMY_HOME")
         );
+    }
+
+    // --- resolve_from_candidates ---
+
+    #[test]
+    fn test_resolve_from_candidates_returns_highest_match() {
+        let candidates = vec![
+            semver::Version::new(18, 17, 0),
+            semver::Version::new(18, 19, 1),
+            semver::Version::new(20, 0, 0),
+        ];
+        let spec = VersionSpec::Major(18);
+        let result = resolve_from_candidates(&candidates, &spec, "node").unwrap();
+        assert_eq!(result, semver::Version::new(18, 19, 1));
+    }
+
+    #[test]
+    fn test_resolve_from_candidates_no_match_returns_version_not_found() {
+        let candidates = vec![semver::Version::new(20, 0, 0)];
+        let spec = VersionSpec::Major(18);
+        let result = resolve_from_candidates(&candidates, &spec, "node");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ProviderError::VersionNotFound { .. }
+        ));
+    }
+
+    #[test]
+    fn test_resolve_from_candidates_empty_returns_version_not_found() {
+        let result = resolve_from_candidates(&[], &VersionSpec::Latest, "node");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ProviderError::VersionNotFound { .. }
+        ));
+    }
+
+    // --- parse_github_releases ---
+
+    #[test]
+    fn test_parse_github_releases_success() {
+        let json = r#"[{"tag_name": "v1.0.0"}, {"tag_name": "v1.1.0"}, {"tag_name": "v2.0.0"}]"#;
+        let versions = parse_github_releases(json, "test", |tag| {
+            tag.strip_prefix('v')
+                .and_then(|s| semver::Version::parse(s).ok())
+        })
+        .unwrap();
+        assert_eq!(versions.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_github_releases_filters_unparseable_tags() {
+        let json =
+            r#"[{"tag_name": "v1.0.0"}, {"tag_name": "not-a-version"}, {"tag_name": "v2.0.0"}]"#;
+        let versions = parse_github_releases(json, "test", |tag| {
+            tag.strip_prefix('v')
+                .and_then(|s| semver::Version::parse(s).ok())
+        })
+        .unwrap();
+        assert_eq!(versions.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_github_releases_all_unparseable_returns_error() {
+        let json = r#"[{"tag_name": "bad"}, {"tag_name": "also-bad"}]"#;
+        let result = parse_github_releases(json, "test", |_| None);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("no stable versions found"));
+    }
+
+    #[test]
+    fn test_parse_github_releases_empty_array_returns_error() {
+        let result = parse_github_releases("[]", "test", |_| None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_github_releases_invalid_json_returns_error() {
+        let result = parse_github_releases("{not json}", "test", |_| None);
+        assert!(result.is_err());
+    }
+
+    // --- Provider::temp_env_dirs default ---
+
+    #[test]
+    fn test_dummy_provider_temp_env_dirs_empty_by_default() {
+        let provider = DummyProvider;
+        assert!(provider.temp_env_dirs().is_empty());
+    }
+
+    // --- Provider::post_install_command default ---
+
+    #[test]
+    fn test_dummy_provider_post_install_command_none_by_default() {
+        let provider = DummyProvider;
+        let version = semver::Version::new(1, 0, 0);
+        let target = Target::new(Platform::MacOS, Arch::Aarch64);
+        assert!(
+            provider
+                .post_install_command(&version, &target, std::path::Path::new("/tmp"))
+                .is_none()
+        );
+    }
+
+    // --- get_provider: unknown tool error message ---
+
+    #[test]
+    fn test_get_provider_unknown_tool_error_message() {
+        let result = get_provider("ruby");
+        let Err(err) = result else {
+            panic!("expected Err for unknown tool");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("ruby"));
+        assert!(msg.contains("runx list"));
+    }
+
+    // --- ProviderError::UnknownTool display ---
+
+    #[test]
+    fn test_provider_error_unknown_tool_display() {
+        let err = ProviderError::UnknownTool {
+            name: "ruby".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("unknown tool `ruby`"));
+        assert!(msg.contains("node, python, go, deno, bun"));
     }
 }

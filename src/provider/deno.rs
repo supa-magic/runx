@@ -5,11 +5,9 @@ use crate::platform::{Arch, Platform, Target};
 use crate::version::VersionSpec;
 
 use super::{
-    ArchiveFormat, Provider, ProviderError, collect_stable_versions, fetch_json,
+    ArchiveFormat, Provider, ProviderError, fetch_json, parse_github_releases,
     resolve_from_candidates,
 };
-
-use super::SimpleGitHubRelease as GitHubRelease;
 
 /// Deno tool provider.
 ///
@@ -29,23 +27,7 @@ impl DenoProvider {
 
     /// Parse GitHub releases JSON into a list of stable Deno versions.
     fn parse_releases(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
-        let releases: Vec<GitHubRelease> =
-            serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
-                tool: "deno".to_string(),
-                reason: format!("failed to parse releases: {e}"),
-            })?;
-
-        let versions =
-            collect_stable_versions(releases.iter().map(|r| Self::parse_tag(&r.tag_name)));
-
-        if versions.is_empty() {
-            return Err(ProviderError::ResolutionFailed {
-                tool: "deno".to_string(),
-                reason: "no stable versions found in releases".to_string(),
-            });
-        }
-
-        Ok(versions)
+        parse_github_releases(json, "deno", Self::parse_tag)
     }
 
     /// Parse a Deno release tag like "v1.40.5" into a semver Version.
