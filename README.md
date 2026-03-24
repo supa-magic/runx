@@ -370,7 +370,8 @@ tools = ["node@22", "python@3.12"]
 
 ```dockerfile
 FROM ubuntu:24.04
-COPY runx /usr/local/bin/runx
+RUN apt-get update && apt-get install -y curl
+RUN curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh
 COPY .runxrc .runxrc.lock* ./
 
 RUN runx -- npm ci
