@@ -244,6 +244,12 @@ mod tests {
         };
         assert_eq!(err.to_string(), "failed to execute `node`: not found");
 
+        let err = ExecutorError::Wait {
+            program: "node".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::Other, "interrupted"),
+        };
+        assert_eq!(err.to_string(), "failed to wait for `node`: interrupted");
+
         let err = ExecutorError::SignalHandler {
             reason: "already set".to_string(),
         };
