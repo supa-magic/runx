@@ -57,13 +57,15 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
 
 /// Collect unique stable versions from an iterator of optional versions.
 ///
-/// Filters out pre-release versions and duplicates.
+/// Filters out pre-release versions and duplicates. Uses a HashSet
+/// for O(n) deduplication instead of O(n^2) Vec::contains.
 pub fn collect_stable_versions(
     versions: impl Iterator<Item = Option<semver::Version>>,
 ) -> Vec<semver::Version> {
+    let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
     for ver in versions.flatten() {
-        if ver.pre.is_empty() && !result.contains(&ver) {
+        if ver.pre.is_empty() && seen.insert(ver.clone()) {
             result.push(ver);
         }
     }
