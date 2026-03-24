@@ -6,16 +6,16 @@ use serde::Deserialize;
 use crate::platform::{Arch, Platform, Target};
 use crate::version::VersionSpec;
 
-use super::{ArchiveFormat, Provider, ProviderError};
+use super::{
+    ArchiveFormat, Provider, ProviderError, collect_stable_versions, fetch_json,
+    resolve_from_candidates,
+};
 
 /// Go version entry from the official download API.
 #[derive(Debug, Deserialize)]
 struct GoVersion {
-    /// Version string (e.g., "go1.21.6").
     version: String,
-    /// Whether this is a stable release.
     stable: bool,
-    /// Available download files (parsed for serde but not currently used).
     #[allow(unused)]
     files: Vec<GoFile>,
 }
@@ -37,24 +37,10 @@ struct GoFile {
 pub struct GoProvider;
 
 impl GoProvider {
-    /// The Go version index URL.
     const INDEX_URL: &str = "https://go.dev/dl/?mode=json";
 
-    /// Fetch and parse the Go version index.
     fn fetch_versions() -> Result<Vec<semver::Version>, ProviderError> {
-        let body = tokio::task::block_in_place(|| {
-            reqwest::blocking::get(Self::INDEX_URL)
-                .map_err(|e| ProviderError::ResolutionFailed {
-                    tool: "go".to_string(),
-                    reason: format!("{e:#}"),
-                })?
-                .text()
-                .map_err(|e| ProviderError::ResolutionFailed {
-                    tool: "go".to_string(),
-                    reason: format!("{e:#}"),
-                })
-        })?;
-
+        let body = fetch_json(Self::INDEX_URL, "go")?;
         Self::parse_versions(&body)
     }
 
@@ -66,18 +52,12 @@ impl GoProvider {
                 reason: format!("failed to parse version index: {e}"),
             })?;
 
-        let mut versions = Vec::new();
-        for release in &releases {
-            if !release.stable {
-                continue;
-            }
-            if let Some(ver) = Self::parse_go_version(&release.version)
-                && ver.pre.is_empty()
-                && !versions.contains(&ver)
-            {
-                versions.push(ver);
-            }
-        }
+        let versions = collect_stable_versions(
+            releases
+                .iter()
+                .filter(|r| r.stable)
+                .map(|r| Self::parse_go_version(&r.version)),
+        );
 
         if versions.is_empty() {
             return Err(ProviderError::ResolutionFailed {
@@ -91,12 +71,10 @@ impl GoProvider {
 
     /// Parse a Go version string like "go1.21.6" into a semver Version.
     ///
-    /// Go versions use the format `go<major>.<minor>.<patch>` but sometimes
-    /// omit the patch (e.g., `go1.21` means `1.21.0`).
+    /// Go versions omit the patch sometimes: `go1.21` means `1.21.0`.
     fn parse_go_version(s: &str) -> Option<semver::Version> {
         let ver_str = s.strip_prefix("go")?;
 
-        // Try parsing as full semver
         if let Ok(v) = semver::Version::parse(ver_str) {
             return Some(v);
         }
@@ -113,7 +91,7 @@ impl GoProvider {
         None
     }
 
-    /// Map platform/arch to Go's naming convention.
+    /// Map platform to Go's naming convention.
     fn go_os(platform: Platform) -> &'static str {
         match platform {
             Platform::MacOS => "darwin",
@@ -122,6 +100,7 @@ impl GoProvider {
         }
     }
 
+    /// Map architecture to Go's naming convention (amd64, not x64).
     fn go_arch(arch: Arch) -> &'static str {
         match arch {
             Arch::X86_64 => "amd64",
@@ -141,12 +120,7 @@ impl Provider for GoProvider {
         _target: &Target,
     ) -> Result<semver::Version, ProviderError> {
         let candidates = Self::fetch_versions()?;
-        spec.resolve(&candidates)
-            .cloned()
-            .ok_or_else(|| ProviderError::VersionNotFound {
-                tool: "go".to_string(),
-                spec: spec.to_string(),
-            })
+        resolve_from_candidates(&candidates, spec, "go")
     }
 
     fn download_url(
@@ -168,54 +142,26 @@ impl Provider for GoProvider {
     }
 
     fn bin_paths(&self, _version: &semver::Version, _target: &Target) -> Vec<PathBuf> {
-        // Go archives extract to a "go/" directory with bin/ inside
         vec![PathBuf::from("go").join("bin")]
     }
 
     fn env_vars(&self, install_dir: &Path) -> HashMap<String, String> {
-        let mut vars = HashMap::new();
-        vars.insert(
+        HashMap::from([(
             "GOROOT".to_string(),
             install_dir.join("go").to_string_lossy().to_string(),
-        );
-        // GOPATH is set to a per-invocation temp directory by the TempDirs guard
-        // in run.rs, not here. This method only sets static env vars.
-        vars
+        )])
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_helpers::*;
     use super::*;
-
-    fn macos_arm64() -> Target {
-        Target::new(Platform::MacOS, Arch::Aarch64)
-    }
-
-    fn linux_x64() -> Target {
-        Target::new(Platform::Linux, Arch::X86_64)
-    }
-
-    fn linux_arm64() -> Target {
-        Target::new(Platform::Linux, Arch::Aarch64)
-    }
-
-    fn windows_x64() -> Target {
-        Target::new(Platform::Windows, Arch::X86_64)
-    }
-
-    fn v(s: &str) -> semver::Version {
-        semver::Version::parse(s).unwrap()
-    }
-
-    // --- Provider trait ---
 
     #[test]
     fn test_name() {
         assert_eq!(GoProvider.name(), "go");
     }
-
-    // --- Download URL ---
 
     #[test]
     fn test_download_url_macos_arm64() {
@@ -247,8 +193,6 @@ mod tests {
         assert_eq!(url, "https://go.dev/dl/go1.21.6.windows-amd64.zip");
     }
 
-    // --- Archive format ---
-
     #[test]
     fn test_archive_format_unix() {
         assert_eq!(
@@ -269,25 +213,17 @@ mod tests {
         );
     }
 
-    // --- Bin paths ---
-
     #[test]
     fn test_bin_paths() {
         let paths = GoProvider.bin_paths(&v("1.21.6"), &macos_arm64());
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], PathBuf::from("go/bin"));
+        assert_eq!(paths, vec![PathBuf::from("go/bin")]);
     }
-
-    // --- Env vars ---
 
     #[test]
     fn test_env_vars() {
         let vars = GoProvider.env_vars(Path::new("/cache/go/1.21.6"));
         assert_eq!(vars.get("GOROOT").unwrap(), "/cache/go/1.21.6/go");
-        assert_eq!(vars.len(), 1); // GOPATH is managed by TempDirs, not here
     }
-
-    // --- parse_go_version ---
 
     #[test]
     fn test_parse_go_version_full() {
@@ -309,21 +245,11 @@ mod tests {
         assert!(GoProvider::parse_go_version("gonotaversion").is_none());
     }
 
-    // --- parse_versions ---
-
     #[test]
     fn test_parse_versions_basic() {
         let json = r#"[
-            {
-                "version": "go1.22.0",
-                "stable": true,
-                "files": []
-            },
-            {
-                "version": "go1.21.6",
-                "stable": true,
-                "files": []
-            }
+            {"version": "go1.22.0", "stable": true, "files": []},
+            {"version": "go1.21.6", "stable": true, "files": []}
         ]"#;
         let versions = GoProvider::parse_versions(json).unwrap();
         assert_eq!(versions.len(), 2);
@@ -334,31 +260,20 @@ mod tests {
     #[test]
     fn test_parse_versions_filters_unstable() {
         let json = r#"[
-            {
-                "version": "go1.22.0",
-                "stable": true,
-                "files": []
-            },
-            {
-                "version": "go1.23rc1",
-                "stable": false,
-                "files": []
-            }
+            {"version": "go1.22.0", "stable": true, "files": []},
+            {"version": "go1.23rc1", "stable": false, "files": []}
         ]"#;
         let versions = GoProvider::parse_versions(json).unwrap();
         assert_eq!(versions.len(), 1);
-        assert_eq!(versions[0], v("1.22.0"));
     }
 
     #[test]
-    fn test_parse_versions_no_patch() {
-        let json = r#"[{
-            "version": "go1.21",
-            "stable": true,
-            "files": []
-        }]"#;
-        let versions = GoProvider::parse_versions(json).unwrap();
-        assert_eq!(versions[0], v("1.21.0"));
+    fn test_parse_versions_deduplicates() {
+        let json = r#"[
+            {"version": "go1.21.6", "stable": true, "files": []},
+            {"version": "go1.21.6", "stable": true, "files": []}
+        ]"#;
+        assert_eq!(GoProvider::parse_versions(json).unwrap().len(), 1);
     }
 
     #[test]
@@ -370,18 +285,6 @@ mod tests {
     fn test_parse_versions_invalid_json() {
         assert!(GoProvider::parse_versions("not json").is_err());
     }
-
-    #[test]
-    fn test_parse_versions_deduplicates() {
-        let json = r#"[
-            {"version": "go1.21.6", "stable": true, "files": []},
-            {"version": "go1.21.6", "stable": true, "files": []}
-        ]"#;
-        let versions = GoProvider::parse_versions(json).unwrap();
-        assert_eq!(versions.len(), 1);
-    }
-
-    // --- Go OS/arch mapping ---
 
     #[test]
     fn test_go_os() {
@@ -396,17 +299,13 @@ mod tests {
         assert_eq!(GoProvider::go_arch(Arch::Aarch64), "arm64");
     }
 
-    // --- get_provider ---
-
     #[test]
     fn test_get_provider_go() {
-        let provider = super::super::get_provider("go").unwrap();
-        assert_eq!(provider.name(), "go");
+        assert_eq!(super::super::get_provider("go").unwrap().name(), "go");
     }
 
     #[test]
     fn test_get_provider_golang_alias() {
-        let provider = super::super::get_provider("golang").unwrap();
-        assert_eq!(provider.name(), "go");
+        assert_eq!(super::super::get_provider("golang").unwrap().name(), "go");
     }
 }
