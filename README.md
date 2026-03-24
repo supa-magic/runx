@@ -22,7 +22,7 @@ That's it. Node 22 was downloaded, cached, and your command ran in a fully isola
 
 ---
 
-## Why developers love runx
+## Examples
 
 > **"Install Node 18, Python 3.12, and Go 1.22. Oh, and make sure it's the same versions as production."**
 
@@ -263,115 +263,6 @@ runx --with go --with rust -- ./integration-tests.sh
 
 </details>
 
-| Problem | Before runx | With runx |
-|---------|-------------|-----------|
-| "Works on my machine" | Everyone has different versions | `.runxrc` pins versions for the whole team |
-| Testing across versions | `nvm use 18`, test, `nvm use 22`, test | `runx --with node@18 -- npm test` |
-| CI/CD tool setup | `actions/setup-node@v4` + `actions/setup-python@v5` + ... | `runx --with node@22 -- npm run build` |
-| Onboarding a new dev | "Follow these 12 setup steps..." | `git clone && runx -- npm start` |
-| Trying a new runtime | Install globally, use once, forget to uninstall | `runx --with bun -- bun run index.ts` |
-| Environment pollution | `NVM_DIR`, `PYENV_ROOT` leaking everywhere | runx builds a clean-room env every time |
-
----
-
-## Install
-
-```bash
-# macOS (Apple Silicon)
-curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-apple-darwin.tar.gz | tar xz
-sudo mv runx /usr/local/bin/
-
-# macOS (Intel)
-curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-apple-darwin.tar.gz | tar xz
-sudo mv runx /usr/local/bin/
-
-# Linux (x64)
-curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-unknown-linux-gnu.tar.gz | tar xz
-sudo mv runx /usr/local/bin/
-
-# Linux (ARM64)
-curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-unknown-linux-gnu.tar.gz | tar xz
-sudo mv runx /usr/local/bin/
-
-# Windows — download .zip from Releases
-# https://github.com/supa-magic/runx/releases/latest
-```
-
-<details>
-<summary>Build from source</summary>
-
-```bash
-# Requires Rust toolchain
-cargo install --git https://github.com/supa-magic/runx.git
-```
-
-</details>
-
-Single binary. No dependencies. No Node.js or Python required to run runx itself.
-
----
-
-## Features
-
-### Supported runtimes
-
-| Runtime | Examples | Version source |
-|---------|----------|----------------|
-| **Node.js** | `node@18` `node@20.11.0` `nodejs` | nodejs.org |
-| **Python** | `python@3.12` `python@3.12.1` `python3` | python-build-standalone |
-| **Go** | `go@1` `go@1.22.0` `golang` | go.dev |
-| **Deno** | `deno@2` `deno@2.0.0` | GitHub releases |
-| **Bun** | `bun@1` `bun@1.2.0` `bunx` | GitHub releases |
-| **Ruby** | `ruby@3` `ruby@3.3.0` `rb` | ruby-builder releases |
-| **Java** | `java@21` `java@21.0.2` `jdk` | Eclipse Adoptium API |
-| **Rust** | `rust@1` `rust@1.77.0` `rustc` `cargo` | static.rust-lang.org |
-| **Any tool** | via [plugins](#-plugins) | configurable |
-
-### Smart version pinning
-
-```bash
-runx --with node@22         -- node -v   # Latest 22.x.x → 22.22.1
-runx --with node@22.11      -- node -v   # Latest 22.11.x
-runx --with node@22.11.0    -- node -v   # Exact version
-runx --with node             -- node -v   # Latest stable
-```
-
-### Parallel downloads
-
-```bash
-# Downloads Node AND Python at the same time
-runx --with node@22 --with python@3.12 -- node process.js
-```
-
-### Full environment isolation
-
-Every command runs in a **clean-room environment** — your system PATH, `NVM_DIR`, `PYENV_ROOT`, and other tool managers are invisible:
-
-| Always inherited | Constructed by runx | Blocked |
-|-----------------|--------------------|---------|
-| `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR` | `PATH` = tool bins + `/usr/bin` | Your `PATH`, `NVM_DIR`, `PYENV_ROOT`, etc. |
-
-This means no version conflicts, no leaked env vars, and no "works on my machine" surprises.
-
-Need your full environment? Add `--inherit-env`.
-
-### Instant caching
-
-First run downloads the tool. Every subsequent run starts in **milliseconds** from cache:
-
-```bash
-$ time runx --with node@22 -- node -e "console.log('fast')"
-# First run: ~3s (download + extract)
-# Cached run: ~0.1s
-```
-
-### Preview mode
-
-```bash
-runx --dry-run --with node@22 -- node -v
-# Shows what would be downloaded and executed, without doing it
-```
-
 ---
 
 ## Team Configuration
@@ -391,6 +282,52 @@ runx -- python3 manage.py      # Picks up python@3.12 from .runxrc
 ```
 
 **No flags. No setup. Same versions everywhere.**
+
+<details>
+<summary><b>.runxrc examples for popular stacks</b></summary>
+
+```toml
+# Full-stack JavaScript
+tools = ["node@22"]
+```
+
+```toml
+# Python web app
+tools = ["python@3.12"]
+```
+
+```toml
+# Go microservice
+tools = ["go@1"]
+```
+
+```toml
+# Java Spring Boot
+tools = ["java@21"]
+```
+
+```toml
+# Ruby on Rails
+tools = ["ruby@3"]
+```
+
+```toml
+# Rust CLI tool
+tools = ["rust@1"]
+```
+
+```toml
+# Full-stack: Node frontend + Python backend
+tools = ["node@22", "python@3.12"]
+```
+
+```toml
+# Monorepo with everything
+tools = ["node@22", "python@3.12", "go@1"]
+inherit_env = true
+```
+
+</details>
 
 ```bash
 runx init                                    # Interactive setup wizard
@@ -420,7 +357,7 @@ When `.runxrc.lock` exists, runx skips version resolution entirely — same bina
 
 ## Self-Contained Scripts
 
-The killer feature: scripts that **bring their own runtime**. Add a shebang line and the script downloads its runtime on first run.
+Scripts that **bring their own runtime**. Add a shebang line and the script downloads its runtime on first run.
 
 <details>
 <summary><b>deploy.js</b> — Node.js deployment script</summary>
@@ -574,6 +511,106 @@ Share scripts with your team, drop them in CI, hand them to clients — they jus
 
 ---
 
+## Install
+
+```bash
+# macOS (Apple Silicon)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# macOS (Intel)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-apple-darwin.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# Linux (x64)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# Linux (ARM64)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# Windows — download .zip from Releases
+# https://github.com/supa-magic/runx/releases/latest
+```
+
+<details>
+<summary>Build from source</summary>
+
+```bash
+# Requires Rust toolchain
+cargo install --git https://github.com/supa-magic/runx.git
+```
+
+</details>
+
+Single binary. No dependencies. No Node.js or Python required to run runx itself.
+
+---
+
+## Features
+
+### Supported runtimes
+
+| Runtime | Examples | Version source |
+|---------|----------|----------------|
+| **Node.js** | `node@18` `node@20.11.0` `nodejs` | nodejs.org |
+| **Python** | `python@3.12` `python@3.12.1` `python3` | python-build-standalone |
+| **Go** | `go@1` `go@1.22.0` `golang` | go.dev |
+| **Deno** | `deno@2` `deno@2.0.0` | GitHub releases |
+| **Bun** | `bun@1` `bun@1.2.0` `bunx` | GitHub releases |
+| **Ruby** | `ruby@3` `ruby@3.3.0` `rb` | ruby-builder releases |
+| **Java** | `java@21` `java@21.0.2` `jdk` | Eclipse Adoptium API |
+| **Rust** | `rust@1` `rust@1.77.0` `rustc` `cargo` | static.rust-lang.org |
+| **Any tool** | via [plugins](#-plugins) | configurable |
+
+### Smart version pinning
+
+```bash
+runx --with node@22         -- node -v   # Latest 22.x.x
+runx --with node@22.11      -- node -v   # Latest 22.11.x
+runx --with node@22.11.0    -- node -v   # Exact version
+runx --with node             -- node -v   # Latest stable
+```
+
+### Parallel downloads
+
+```bash
+# Downloads Node AND Python at the same time
+runx --with node@22 --with python@3.12 -- node process.js
+```
+
+### Full environment isolation
+
+Every command runs in a **clean-room environment** — your system PATH, `NVM_DIR`, `PYENV_ROOT`, and other tool managers are invisible:
+
+| Always inherited | Constructed by runx | Blocked |
+|-----------------|--------------------|---------|
+| `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR` | `PATH` = tool bins + `/usr/bin` | Your `PATH`, `NVM_DIR`, `PYENV_ROOT`, etc. |
+
+This means no version conflicts, no leaked env vars, and no "works on my machine" surprises.
+
+Need your full environment? Add `--inherit-env`.
+
+### Instant caching
+
+First run downloads the tool. Every subsequent run starts in **milliseconds** from cache:
+
+```bash
+$ time runx --with node@22 -- node -e "console.log('fast')"
+# First run: ~3s (download + extract)
+# Cached run: ~0.1s
+```
+
+### Preview mode
+
+```bash
+runx --dry-run --with node@22 -- node -v
+# Shows what would be downloaded and executed, without doing it
+```
+
+---
+
 ## Global Install
 
 Use runx as a **lightweight version manager** when you want tools permanently available:
@@ -663,7 +700,7 @@ runx --with node@22 -- node server.js
   6. Exit        Forward exit code, clean up temp dirs
 ```
 
-Cached tools skip steps 1–3 — repeat runs start in **milliseconds**.
+Cached tools skip steps 1-3 — repeat runs start in **milliseconds**.
 
 Written in Rust. Single binary. No runtime dependencies.
 
@@ -703,7 +740,7 @@ OPTIONS:
 
 ```bash
 git clone https://github.com/supa-magic/runx.git && cd runx
-cargo test                    # 463 tests
+cargo test                    # 479 tests
 cargo clippy                  # Zero warnings policy
 cargo fmt --check             # Enforced formatting
 ```
