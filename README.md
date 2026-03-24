@@ -101,7 +101,13 @@ runx --dry-run -- node -v
 # Shows: loaded config from /path/to/project/.runxrc
 ```
 
-Scaffold a new config file with `runx init`.
+Scaffold a new config file with `runx init`:
+
+```bash
+runx init                                          # Interactive tool selection
+runx init --with node@18 --with python@3.11        # Non-interactive mode
+runx init --force                                  # Overwrite existing .runxrc
+```
 
 ### Cache management
 
@@ -114,7 +120,9 @@ runx clean -y                      # Skip confirmation prompt
 runx clean --tool node             # Remove only Node.js caches
 runx clean --older-than 30d        # Remove caches older than 30 days
 runx --dry-run clean               # Show what would be deleted without deleting
-runx init                          # Scaffold a .runxrc config file
+runx init                          # Interactive .runxrc scaffolding
+runx init --with node@18           # Non-interactive with specific tools
+runx init --force                  # Overwrite existing .runxrc
 ```
 
 ## How It Works
@@ -147,6 +155,7 @@ src/
   clean.rs         Cache cleanup with filtering and disk space reporting
   cli.rs           CLI parsing (clap derive)
   config.rs        .runxrc TOML config file discovery and parsing
+  init.rs          Interactive/non-interactive .runxrc scaffolding
   run.rs           Orchestration: resolve -> download -> env -> execute
   cache.rs         ~/.runx/cache/ management
   download.rs      Streaming HTTP download + archive extraction
