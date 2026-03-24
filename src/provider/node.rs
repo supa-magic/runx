@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::platform::{Arch, Platform, Target};
+use crate::platform::{Platform, Target};
 use crate::version::VersionSpec;
 
 use super::{

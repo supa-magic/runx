@@ -19,8 +19,9 @@ No daemon, no persistent containers, no impact on your existing tool installatio
 | **Node.js** | `node@18`, `node@20.11.0`, `node` | nodejs.org dist index |
 | **Python** | `python@3.11`, `python@3.12.1`, `python3` | python-build-standalone (GitHub) |
 | **Go** | `go@1.21`, `go@1.22.0`, `golang` | go.dev official downloads |
+| **Deno** | `deno@1.40`, `deno@2.0.0`, `deno` | GitHub releases (denoland/deno) |
 
-More tools (Deno, Bun) are planned.
+More tools (Bun) are planned.
 
 ## Installation
 
@@ -45,6 +46,9 @@ runx --with python@3.11 -- python3 script.py
 
 # Run a Go program with Go 1.21
 runx --with go@1.21 -- go run main.go
+
+# Run a Deno script with Deno 2.0
+runx --with deno@2.0 -- deno run server.ts
 ```
 
 ### Use multiple tools together
@@ -130,6 +134,7 @@ src/
     node.rs        Node.js provider
     python.rs      Python provider
     go.rs          Go provider
+    deno.rs        Deno provider
 ```
 
 ## License
