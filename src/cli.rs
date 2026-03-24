@@ -332,4 +332,35 @@ mod tests {
     fn test_duration_invalid_number_rejected() {
         assert!("abcd".parse::<HumanDuration>().is_err());
     }
+
+    // --- ToolSpec::version_spec ---
+
+    #[test]
+    fn test_version_spec_with_version() {
+        let spec = ToolSpec {
+            name: "node".to_string(),
+            version: Some("18".to_string()),
+        };
+        let vs = spec.version_spec().unwrap();
+        assert_eq!(vs.to_string(), "18");
+    }
+
+    #[test]
+    fn test_version_spec_none_returns_latest() {
+        let spec = ToolSpec {
+            name: "node".to_string(),
+            version: None,
+        };
+        let vs = spec.version_spec().unwrap();
+        assert_eq!(vs.to_string(), "latest");
+    }
+
+    #[test]
+    fn test_version_spec_invalid_returns_error() {
+        let spec = ToolSpec {
+            name: "node".to_string(),
+            version: Some("not..valid".to_string()),
+        };
+        assert!(spec.version_spec().is_err());
+    }
 }

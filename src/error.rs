@@ -129,4 +129,17 @@ mod tests {
         let err: RunxError = CacheError::NoHomeDir.into();
         assert!(matches!(err, RunxError::Cache(_)));
     }
+
+    #[test]
+    fn test_no_home_dir_display() {
+        let err = RunxError::NoHomeDir;
+        assert_eq!(err.to_string(), "cannot determine home directory");
+    }
+
+    #[test]
+    fn test_plugin_error_display() {
+        let err = RunxError::Plugin("missing manifest".to_string());
+        assert!(err.to_string().contains("missing manifest"));
+        assert!(err.to_string().contains("plugin error"));
+    }
 }
