@@ -63,10 +63,10 @@ impl NodeProvider {
         let mut versions = Vec::new();
         for entry in &entries {
             let ver_str = entry.version.strip_prefix('v').unwrap_or(&entry.version);
-            if let Ok(v) = semver::Version::parse(ver_str) {
-                if v.pre.is_empty() {
-                    versions.push(v);
-                }
+            if let Ok(v) = semver::Version::parse(ver_str)
+                && v.pre.is_empty()
+            {
+                versions.push(v);
             }
         }
 
@@ -145,12 +145,11 @@ impl Provider for NodeProvider {
 
     fn bin_paths(&self, version: &semver::Version, target: &Target) -> Vec<PathBuf> {
         let dir_name = Self::archive_dir_name(version, target);
+        // PATH expects directories, not individual files.
+        // On Unix: node-v18.19.1-darwin-arm64/bin/
+        // On Windows: node-v18.19.1-win-x64/ (node.exe, npm.cmd, npx.cmd are in the root)
         match target.platform {
-            Platform::Windows => vec![
-                PathBuf::from(&dir_name).join("node.exe"),
-                PathBuf::from(&dir_name).join("npm.cmd"),
-                PathBuf::from(&dir_name).join("npx.cmd"),
-            ],
+            Platform::Windows => vec![PathBuf::from(&dir_name)],
             _ => vec![PathBuf::from(&dir_name).join("bin")],
         }
     }
@@ -261,10 +260,9 @@ mod tests {
     #[test]
     fn test_bin_paths_windows() {
         let paths = NodeProvider.bin_paths(&v("18.19.1"), &windows_x64());
-        assert_eq!(paths.len(), 3);
-        assert!(paths[0].to_string_lossy().ends_with("node.exe"));
-        assert!(paths[1].to_string_lossy().ends_with("npm.cmd"));
-        assert!(paths[2].to_string_lossy().ends_with("npx.cmd"));
+        assert_eq!(paths.len(), 1);
+        // Windows: directory root contains node.exe, npm.cmd, npx.cmd
+        assert_eq!(paths[0], PathBuf::from("node-v18.19.1-win-x64"));
     }
 
     // --- Env vars ---
