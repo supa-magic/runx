@@ -67,33 +67,20 @@ pub trait Provider {
 }
 
 /// Errors that occur during provider operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     /// No version matched the given spec.
+    #[error("no {tool} version found matching `{spec}`")]
     VersionNotFound { tool: String, spec: String },
+
     /// The tool does not support this platform/architecture combination.
+    #[error("{tool} does not support target `{target}`")]
     UnsupportedTarget { tool: String, target: String },
+
     /// Network or API error during version resolution.
+    #[error("failed to resolve {tool} version: {reason}")]
     ResolutionFailed { tool: String, reason: String },
 }
-
-impl std::fmt::Display for ProviderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::VersionNotFound { tool, spec } => {
-                write!(f, "no {tool} version found matching `{spec}`")
-            }
-            Self::UnsupportedTarget { tool, target } => {
-                write!(f, "{tool} does not support target `{target}`")
-            }
-            Self::ResolutionFailed { tool, reason } => {
-                write!(f, "failed to resolve {tool} version: {reason}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ProviderError {}
 
 #[cfg(test)]
 mod tests {
