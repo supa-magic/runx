@@ -209,6 +209,51 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_completions_bash() {
+        let cli = Cli::try_parse_from(["runx", "completions", "bash"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Completions {
+                shell: crate::cli::ShellType::Bash
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_completions_zsh() {
+        let cli = Cli::try_parse_from(["runx", "completions", "zsh"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Completions {
+                shell: crate::cli::ShellType::Zsh
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_completions_fish() {
+        let cli = Cli::try_parse_from(["runx", "completions", "fish"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Completions {
+                shell: crate::cli::ShellType::Fish
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_completions_missing_shell_rejected() {
+        let result = Cli::try_parse_from(["runx", "completions"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_completions_invalid_shell_rejected() {
+        let result = Cli::try_parse_from(["runx", "completions", "powershell"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_parse_unknown_flag_rejected() {
         let result = Cli::try_parse_from(["runx", "--unknown"]);
         assert!(result.is_err());

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// A tool specifier in the format `name` or `name@version`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +127,9 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Remove cached tool binaries to reclaim disk space
+    #[command(
+        after_help = "Examples:\n  runx clean                         Remove all cached binaries\n  runx clean --tool node             Remove only Node.js caches\n  runx clean --older-than 30d        Remove caches older than 30 days\n  runx clean -y                      Skip confirmation prompt"
+    )]
     Clean {
         /// Remove only caches for this tool
         #[arg(long, value_name = "NAME")]
@@ -142,6 +145,9 @@ pub enum Command {
     },
 
     /// List available tools and cached versions
+    #[command(
+        after_help = "Examples:\n  runx list                          Show all supported tools\n  runx list --cached                 Show cached versions with sizes\n  runx list node                     Show available Node.js versions"
+    )]
     List {
         /// Show only cached tool versions with sizes
         #[arg(long)]
@@ -152,6 +158,9 @@ pub enum Command {
     },
 
     /// Scaffold a .runxrc config file in the current directory
+    #[command(
+        after_help = "Examples:\n  runx init                          Interactive tool selection\n  runx init --with node@18           Non-interactive with specific tools\n  runx init --force                  Overwrite existing .runxrc"
+    )]
     Init {
         /// Tool to include (repeatable, e.g. --with node@18)
         #[arg(long = "with", value_name = "TOOL@VERSION")]
@@ -161,6 +170,23 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
+
+    /// Generate shell completions for bash, zsh, or fish
+    #[command(
+        after_help = "Examples:\n  runx completions bash > ~/.bash_completion.d/runx\n  runx completions zsh > ~/.zfunc/_runx\n  runx completions fish > ~/.config/fish/completions/runx.fish"
+    )]
+    Completions {
+        /// Shell to generate completions for
+        shell: ShellType,
+    },
+}
+
+/// Supported shell types for completion generation.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ShellType {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[cfg(test)]

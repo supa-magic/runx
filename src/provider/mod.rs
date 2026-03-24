@@ -154,20 +154,28 @@ pub trait Provider {
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     /// The requested tool is not supported.
-    #[error("unknown tool `{name}`. Supported tools: node, python, go, deno, bun")]
+    #[error(
+        "unknown tool `{name}`.\n  Supported tools: node, python, go, deno, bun\n  Run `runx list` to see all available tools."
+    )]
     UnknownTool { name: String },
 
     /// No version matched the given spec.
-    #[error("no {tool} version found matching `{spec}`")]
+    #[error(
+        "no {tool} version found matching `{spec}`.\n  Run `runx list {tool}` to see available versions."
+    )]
     VersionNotFound { tool: String, spec: String },
 
     /// The tool does not support this platform/architecture combination.
     #[allow(unused)]
-    #[error("{tool} does not support target `{target}`")]
+    #[error(
+        "{tool} does not support target `{target}`.\n  Run `runx list {tool}` to see supported platforms."
+    )]
     UnsupportedTarget { tool: String, target: String },
 
     /// Network or API error during version resolution.
-    #[error("failed to resolve {tool} version: {reason}")]
+    #[error(
+        "failed to resolve {tool} version: {reason}\n  Check your network connection and try again."
+    )]
     ResolutionFailed { tool: String, reason: String },
 }
 
@@ -209,7 +217,9 @@ mod tests {
             tool: "node".to_string(),
             spec: "99".to_string(),
         };
-        assert_eq!(err.to_string(), "no node version found matching `99`");
+        let msg = err.to_string();
+        assert!(msg.contains("no node version found matching `99`"));
+        assert!(msg.contains("runx list node"));
     }
 
     #[test]
@@ -218,10 +228,9 @@ mod tests {
             tool: "bun".to_string(),
             target: "Windows-x86_64".to_string(),
         };
-        assert_eq!(
-            err.to_string(),
-            "bun does not support target `Windows-x86_64`"
-        );
+        let msg = err.to_string();
+        assert!(msg.contains("bun does not support target `Windows-x86_64`"));
+        assert!(msg.contains("runx list bun"));
     }
 
     #[test]
@@ -230,10 +239,9 @@ mod tests {
             tool: "python".to_string(),
             reason: "network timeout".to_string(),
         };
-        assert_eq!(
-            err.to_string(),
-            "failed to resolve python version: network timeout"
-        );
+        let msg = err.to_string();
+        assert!(msg.contains("failed to resolve python version: network timeout"));
+        assert!(msg.contains("Check your network connection"));
     }
 
     #[test]
