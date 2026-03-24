@@ -584,6 +584,7 @@ Placeholders: `{version}`, `{os}`, `{arch}`, `{triple}`, `{os_alt}`, `{arch_alt}
 ```bash
 runx list                      # All tools and cache status
 runx list --cached             # Cached versions with disk sizes
+runx list --cached java        # Cached versions for a specific tool
 runx clean                     # Remove everything (with confirmation)
 runx clean --tool node         # Remove only Node.js caches
 runx clean --older-than 30d    # Remove stale versions
