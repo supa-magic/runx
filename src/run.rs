@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use std::env;
+
 use crate::cache::Cache;
 use crate::cli::{Cli, Command};
+use crate::config;
 use crate::download::download_and_install;
 use crate::environment::{Environment, TempDirs};
 use crate::error::RunxError;
@@ -27,11 +30,38 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
             if cli.cmd.is_empty() {
                 return Err(RunxError::NoCommand);
             }
-            if cli.tools.is_empty() {
+
+            // Load .runxrc config and merge with CLI flags
+            let cwd = env::current_dir().map_err(RunxError::NoCwd)?;
+            let cfg = config::load_config(&cwd)?;
+
+            // CLI --with flags override config tools entirely; if no CLI tools, use config
+            let mut merged = cli;
+            if merged.tools.is_empty() {
+                merged.tools = cfg.tools;
+            }
+
+            // Config inherit_env is a default; CLI --inherit-env flag overrides.
+            // Since --inherit-env is a bool flag (true if passed, false if not),
+            // !merged.inherit_env reliably means "user did not pass --inherit-env".
+            if let Some(inherit) = cfg.inherit_env
+                && !merged.inherit_env
+            {
+                merged.inherit_env = inherit;
+            }
+
+            if merged.tools.is_empty() {
                 return Err(RunxError::NoTools);
             }
 
-            run_command(&cli).await?;
+            // Show config source in dry-run or verbose mode
+            if let Some(ref source) = cfg.source
+                && (merged.dry_run || merged.verbose)
+            {
+                eprintln!("Loaded config: {}", source.display());
+            }
+
+            run_command(&merged).await?;
         }
     }
 

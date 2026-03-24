@@ -1,4 +1,5 @@
 use crate::cache::CacheError;
+use crate::config::ConfigError;
 use crate::download::DownloadError;
 use crate::environment::EnvironmentError;
 use crate::executor::ExecutorError;
@@ -45,4 +46,12 @@ pub enum RunxError {
     /// A command execution error.
     #[error(transparent)]
     Executor(#[from] ExecutorError),
+
+    /// A config file error.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+
+    /// Failed to determine the current working directory.
+    #[error("cannot determine current directory: {0}")]
+    NoCwd(std::io::Error),
 }
