@@ -1,193 +1,195 @@
 # runx
 
-A cross-platform CLI tool that creates isolated, ephemeral environments with specific tool versions, runs a command, and exits. Like npx, but for any tool and with full environment isolation.
+Ephemeral environment runner — run any command with specific tool versions, without installing anything globally.
 
-No daemon, no persistent containers, no impact on your existing tool installations.
+Like `npx`, but for **any** runtime. No daemon, no containers, no impact on your system.
 
-## Features
+```bash
+runx --with node@18 -- node -v       # v18.20.8
+runx --with python@3.12 -- python3 -c "print('hello')"
+runx --with go@1 -- go version
+```
 
-- Run any command with pinned tool versions in a single invocation
-- Automatic download and caching of tool binaries (parallel downloads when multiple tools requested)
-- Full environment isolation -- your system tools are never affected
-- Cross-platform: macOS (arm64, x86_64), Linux (x86_64, arm64), Windows (x86_64)
-- Sub-second startup for cached tools
+## Highlights
+
+- **5 runtimes** — Node.js, Python, Go, Deno, Bun
+- **Version pinning** — major (`@18`), minor (`@18.19`), or exact (`@18.19.1`)
+- **Isolated environments** — your system PATH is never touched
+- **Automatic caching** — first run downloads, subsequent runs are instant
+- **Parallel downloads** — multiple `--with` flags download concurrently
+- **Project config** — `.runxrc` files so your team uses the same versions
+- **Cross-platform** — macOS, Linux, Windows (x64 and ARM64)
+
+## Install
+
+**Prebuilt binaries** — download from [Releases](https://github.com/supa-magic/runx/releases/latest):
+
+```bash
+# macOS (Apple Silicon)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# macOS (Intel)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-apple-darwin.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# Linux (x64)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+
+# Linux (ARM64)
+curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv runx /usr/local/bin/
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/supa-magic/runx.git && cd runx
+cargo build --release
+# Binary at target/release/runx
+```
+
+## Quick Start
+
+```bash
+# Run a command with a specific tool version
+runx --with node@18 -- node -v
+
+# Use multiple tools together
+runx --with node@20 --with python@3.12 -- node process.js
+
+# Latest stable version (omit version)
+runx --with deno -- deno --version
+
+# See what would happen without doing it
+runx --dry-run --with go@1 -- go version
+```
 
 ## Supported Tools
 
-| Tool | Spec examples | Version source |
-|------|---------------|----------------|
-| **Node.js** | `node@18`, `node@20.11.0`, `node` | nodejs.org dist index |
-| **Python** | `python@3.11`, `python@3.12.1`, `python3` | python-build-standalone (GitHub) |
-| **Go** | `go@1.21`, `go@1.22.0`, `golang` | go.dev official downloads |
-| **Deno** | `deno@1.40`, `deno@2.0.0`, `deno` | GitHub releases (denoland/deno) |
-| **Bun** | `bun@1.1`, `bun@1.2.0`, `bunx` | GitHub releases (oven-sh/bun) |
-
-## Installation
-
-```bash
-# Clone and build from source
-git clone <repo-url> && cd runx
-cargo build --release
-
-# Binary will be at target/release/runx
-```
-
-## Usage
-
-### Run a command with a specific tool version
-
-```bash
-# Run node -v with Node.js 18
-runx --with node@18 -- node -v
-
-# Run a Python script with Python 3.11
-runx --with python@3.11 -- python3 script.py
-
-# Run a Go program with Go 1.21
-runx --with go@1.21 -- go run main.go
-
-# Run a Deno script with Deno 2.0
-runx --with deno@2.0 -- deno run server.ts
-
-# Run a Bun script with Bun 1.2
-runx --with bun@1.2 -- bun run index.ts
-```
-
-### Use multiple tools together
-
-```bash
-runx --with node@20 --with python@3.11 -- node process.js
-```
+| Tool | Spec examples | Source |
+|------|---------------|--------|
+| **Node.js** | `node@18`, `node@20.11.0`, `nodejs` | nodejs.org |
+| **Python** | `python@3.12`, `python@3.12.1`, `python3` | python-build-standalone |
+| **Go** | `go@1`, `go@1.22.0`, `golang` | go.dev |
+| **Deno** | `deno@2`, `deno@2.0.0` | GitHub releases |
+| **Bun** | `bun@1`, `bun@1.2.0`, `bunx` | GitHub releases |
 
 ### Version specifiers
 
 ```bash
-runx --with node@18          -- node -v   # Latest 18.x.x
-runx --with node@18.19       -- node -v   # Latest 18.19.x
-runx --with node@18.19.1     -- node -v   # Exact version
-runx --with node              -- node -v   # Latest stable
+runx --with node@22         -- node -v   # Latest 22.x.x
+runx --with node@22.11      -- node -v   # Latest 22.11.x
+runx --with node@22.11.0    -- node -v   # Exact version
+runx --with node             -- node -v   # Latest stable
 ```
 
-### Dry run
+## Project Configuration
+
+Create a `.runxrc` file in your project root so everyone on the team uses the same tool versions:
+
+```toml
+# .runxrc
+tools = ["node@18", "python@3.12"]
+inherit_env = false
+```
+
+Then just run commands — no `--with` flags needed:
 
 ```bash
-runx --with node@18 --dry-run -- node -v
-# Shows what would be downloaded and executed without doing it
+runx -- node -v          # Uses node@18 from .runxrc
+runx -- python3 -c "print('hi')"  # Uses python@3.12 from .runxrc
 ```
 
-### Inherit your shell environment
+### How config works
 
-By default, runx creates a clean, isolated environment. Use `--inherit-env` to pass through your existing environment variables:
+- **Auto-discovered** — runx searches the current directory, then walks up parent directories
+- **CLI overrides config** — `--with` flags replace config tools entirely
+- **`inherit_env`** — set to `true` to pass through your shell environment (default: isolated)
+- **Visibility** — use `--dry-run` or `--verbose` to see which config file was loaded
+
+### Scaffold a config
+
+```bash
+runx init                                    # Interactive — prompts for tools
+runx init --with node@18 --with python@3.12  # Non-interactive
+runx init --force                            # Overwrite existing .runxrc
+```
+
+The generated file includes comments explaining each option.
+
+## Environment Isolation
+
+By default, runx creates a clean environment for the child process:
+
+| Inherited | Constructed | Blocked |
+|-----------|-------------|---------|
+| `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR`, `LC_*`, `XDG_*` | `PATH`, `NODE_HOME`, `PYTHONHOME`, `GOROOT` | User's `PATH`, `NVM_DIR`, `PYENV_ROOT`, etc. |
+
+Use `--inherit-env` to keep your full shell environment (tool paths are prepended to PATH):
 
 ```bash
 runx --with node@18 --inherit-env -- node -v
 ```
 
-### Project config with `.runxrc`
+## Cache Management
 
-Instead of passing `--with` flags every time, create a `.runxrc` file in your project root:
-
-```toml
-tools = ["node@18", "python@3.11"]
-inherit_env = true
-```
-
-runx automatically discovers `.runxrc` by searching the current directory and walking up parent directories. CLI `--with` flags override tools specified in the config file.
-
-Use `--dry-run` or `--verbose` to see which config file was loaded:
+Tools are cached at `~/.runx/cache/`. Manage with:
 
 ```bash
-runx --dry-run -- node -v
-# Shows: loaded config from /path/to/project/.runxrc
+runx list                      # Show supported tools and cache status
+runx list --cached             # Show cached versions with disk sizes
+runx list node                 # Query upstream for available versions
+runx clean                     # Remove all cached binaries
+runx clean --tool node         # Remove only Node.js caches
+runx clean --older-than 30d    # Remove stale caches
 ```
 
-Scaffold a new config file with `runx init`:
+## Shell Completions
 
 ```bash
-runx init                                          # Interactive tool selection
-runx init --with node@18 --with python@3.11        # Non-interactive mode
-runx init --force                                  # Overwrite existing .runxrc
-```
-
-### Cache management
-
-```bash
-runx list                          # Show all supported tools with aliases and cache status
-runx list --cached                 # Show cached tool versions with disk sizes
-runx list node                     # Query upstream for available versions of a tool
-runx clean                         # Remove all cached binaries (with confirmation)
-runx clean -y                      # Skip confirmation prompt
-runx clean --tool node             # Remove only Node.js caches
-runx clean --older-than 30d        # Remove caches older than 30 days
-runx --dry-run clean               # Show what would be deleted without deleting
-runx init                          # Interactive .runxrc scaffolding
-runx init --with node@18           # Non-interactive with specific tools
-runx init --force                  # Overwrite existing .runxrc
-```
-
-### Shell completions
-
-Generate tab-completion scripts for your shell:
-
-```bash
-# Bash (add to ~/.bashrc)
+# Bash
 eval "$(runx completions bash)"
 
-# Zsh (add to ~/.zshrc)
+# Zsh
 eval "$(runx completions zsh)"
 
-# Fish (add to ~/.config/fish/config.fish)
+# Fish
 runx completions fish | source
 ```
 
 ## How It Works
 
-1. **Resolve** -- Queries upstream version APIs to resolve `node@18` to an exact version like `18.19.1`
-2. **Download** -- Downloads the binary archive to a temp directory, verifies checksums, extracts it
-3. **Cache** -- Moves the extracted binaries to `~/.runx/cache/<tool>/<version>/<platform>/`
-4. **Environment** -- Builds an isolated environment with only the tool's binaries on PATH, plus minimal system paths (`/usr/bin`, `/bin`)
-5. **Execute** -- Spawns the command as a child process with the constructed environment, forwards signals, and exits with the child's exit code
+1. **Resolve** — queries upstream APIs to find the exact version (e.g., `node@18` → `18.20.8`)
+2. **Download** — streams the binary archive, verifies checksums, extracts it
+3. **Cache** — stores binaries at `~/.runx/cache/<tool>/<version>/<platform>/`
+4. **Isolate** — builds a clean environment with only the tool on PATH
+5. **Execute** — spawns the command, forwards signals, exits with the child's code
 
-On subsequent runs with the same tool version, steps 2-3 are skipped and the cached binaries are used directly.
+Cached tools skip steps 2–3, so repeat runs start instantly.
 
-## Environment Isolation
-
-By default, runx constructs a "clean room" environment for the child process:
-
-| Category | Variables | Behavior |
-|----------|-----------|----------|
-| **Inherited** | `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR`, `LC_*`, `XDG_*` | Always passed through |
-| **Constructed** | `PATH`, `NODE_HOME`, `PYTHONHOME`, `GOROOT` | Set by runx based on tool locations |
-| **Blocked** | User's `PATH`, `NVM_DIR`, `PYENV_ROOT`, etc. | Not inherited (isolation) |
-
-With `--inherit-env`, the full user environment is kept and tool paths are prepended to PATH.
-
-## Architecture
+## CLI Reference
 
 ```
-src/
-  main.rs          Entry point (tokio async)
-  clean.rs         Cache cleanup with filtering and disk space reporting
-  cli.rs           CLI parsing (clap derive)
-  config.rs        .runxrc TOML config file discovery and parsing
-  init.rs          Interactive/non-interactive .runxrc scaffolding
-  run.rs           Orchestration: resolve -> download -> env -> execute
-  cache.rs         ~/.runx/cache/ management
-  download.rs      Streaming HTTP download + archive extraction
-  environment.rs   Isolated environment construction
-  executor.rs      Child process spawning + signal forwarding
-  platform.rs      OS/arch detection
-  version.rs       Semver version resolution
-  error.rs         Error types
-  provider/
-    mod.rs         Provider trait
-    node.rs        Node.js provider
-    python.rs      Python provider
-    go.rs          Go provider
-    deno.rs        Deno provider
-    bun.rs         Bun provider
+runx [OPTIONS] [-- <CMD>...]
+runx <COMMAND>
+
+Commands:
+  list         List available tools and cached versions
+  clean        Remove cached tool binaries
+  init         Scaffold a .runxrc config file
+  completions  Generate shell completions (bash, zsh, fish)
+
+Options:
+  --with <TOOL@VERSION>  Tool to include (repeatable)
+  --dry-run              Show what would happen without doing it
+  --inherit-env          Pass through the user's full environment
+  -v, --verbose          Show download progress and debug output
+  -q, --quiet            Suppress progress output
+  -V, --version          Print version
 ```
 
 ## License
 
-See LICENSE file for details.
+See [LICENSE](LICENSE) file for details.
