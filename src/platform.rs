@@ -56,6 +56,17 @@ impl Platform {
             Self::Windows => ".exe",
         }
     }
+
+    /// Default archive format for this platform.
+    ///
+    /// Windows tools are typically distributed as `.zip`, while Unix
+    /// tools use `.tar.gz` or `.tar.xz`.
+    pub fn default_archive_format(&self) -> crate::provider::ArchiveFormat {
+        match self {
+            Self::MacOS | Self::Linux => crate::provider::ArchiveFormat::TarGz,
+            Self::Windows => crate::provider::ArchiveFormat::Zip,
+        }
+    }
 }
 
 impl fmt::Display for Platform {
@@ -116,12 +127,32 @@ pub struct Target {
 }
 
 impl Target {
+    /// Create a target from explicit platform and architecture.
+    pub fn new(platform: Platform, arch: Arch) -> Self {
+        Self { platform, arch }
+    }
+
     /// Detect the current platform target at runtime.
     pub fn detect() -> Result<Self, String> {
-        Ok(Self {
-            platform: Platform::detect()?,
-            arch: Arch::detect()?,
-        })
+        Ok(Self::new(Platform::detect()?, Arch::detect()?))
+    }
+
+    /// Build a binary filename with the correct executable suffix.
+    ///
+    /// Example: `binary_name("node")` → `"node"` on Unix, `"node.exe"` on Windows.
+    pub fn binary_name(&self, name: &str) -> String {
+        format!("{name}{}", self.platform.exe_suffix())
+    }
+
+    /// Return the cache directory name for this target.
+    ///
+    /// Example: `"darwin-arm64"` for macOS aarch64.
+    pub fn cache_dir_name(&self) -> String {
+        format!(
+            "{}-{}",
+            self.platform.as_download_str(),
+            self.arch.as_download_str()
+        )
     }
 }
 
@@ -230,10 +261,58 @@ mod tests {
 
     #[test]
     fn test_target_display() {
-        let target = Target {
-            platform: Platform::MacOS,
-            arch: Arch::Aarch64,
-        };
+        let target = Target::new(Platform::MacOS, Arch::Aarch64);
         assert_eq!(target.to_string(), "macOS-aarch64");
+    }
+
+    #[test]
+    fn test_target_new() {
+        let target = Target::new(Platform::Linux, Arch::X86_64);
+        assert_eq!(target.platform, Platform::Linux);
+        assert_eq!(target.arch, Arch::X86_64);
+    }
+
+    #[test]
+    fn test_target_binary_name_unix() {
+        let target = Target::new(Platform::MacOS, Arch::Aarch64);
+        assert_eq!(target.binary_name("node"), "node");
+
+        let target = Target::new(Platform::Linux, Arch::X86_64);
+        assert_eq!(target.binary_name("python3"), "python3");
+    }
+
+    #[test]
+    fn test_target_binary_name_windows() {
+        let target = Target::new(Platform::Windows, Arch::X86_64);
+        assert_eq!(target.binary_name("node"), "node.exe");
+    }
+
+    #[test]
+    fn test_target_cache_dir_name() {
+        let target = Target::new(Platform::MacOS, Arch::Aarch64);
+        assert_eq!(target.cache_dir_name(), "darwin-arm64");
+
+        let target = Target::new(Platform::Linux, Arch::X86_64);
+        assert_eq!(target.cache_dir_name(), "linux-x64");
+
+        let target = Target::new(Platform::Windows, Arch::X86_64);
+        assert_eq!(target.cache_dir_name(), "win-x64");
+    }
+
+    #[test]
+    fn test_platform_default_archive_format() {
+        use crate::provider::ArchiveFormat;
+        assert_eq!(
+            Platform::MacOS.default_archive_format(),
+            ArchiveFormat::TarGz
+        );
+        assert_eq!(
+            Platform::Linux.default_archive_format(),
+            ArchiveFormat::TarGz
+        );
+        assert_eq!(
+            Platform::Windows.default_archive_format(),
+            ArchiveFormat::Zip
+        );
     }
 }
