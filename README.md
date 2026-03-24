@@ -29,27 +29,41 @@ That's it. Node 22 was downloaded, cached, and your command ran in a fully isola
 Sound familiar? Here's how runx eliminates that:
 
 ```bash
-runx --with node@22 -- npm test
-runx --with python@3.12 -- python3 app.py
-runx --with java@21 -- javac Main.java && java Main
-runx --with ruby@3 -- ruby -e "puts 'hello from Ruby'"
-runx --with rust@1 -- cargo init hello && cd hello && cargo run
-runx --with go@1 -- go run main.go
+runx --with node -- npm test
+runx --with python -- python3 app.py
+runx --with java -- javac Main.java && java Main
+runx --with ruby -- ruby -e "puts 'hello from Ruby'"
+runx --with rust -- cargo init hello && cd hello && cargo run
+runx --with go -- go run main.go
 ```
 
 <details>
 <summary><b>Node.js</b> — run any version without nvm</summary>
 
 ```bash
+# Latest stable Node — no version needed
+runx --with node -- node -v
+
 # Test against multiple versions
 runx --with node@18 -- npm test
 runx --with node@22 -- npm test
 
-# Run a script with a specific Node version
+# Next.js
+runx --with node -- npx create-next-app@latest my-app
+runx --with node@22 -- npm run dev
+
+# Vite + React
+runx --with node -- npx create-vite my-app --template react-ts
+
+# Express API
 runx --with node@20 -- node server.js
 
-# Use with npm, npx, or any Node tooling
-runx --with node@22 -- npx create-react-app my-app
+# Vercel, Netlify, Wrangler — any npx tool
+runx --with node -- npx vercel deploy
+runx --with node -- npx wrangler dev
+
+# Astro, Nuxt, SvelteKit — whatever you need
+runx --with node -- npx create-astro@latest
 ```
 
 </details>
@@ -58,15 +72,25 @@ runx --with node@22 -- npx create-react-app my-app
 <summary><b>Python</b> — isolated Python without pyenv or conda</summary>
 
 ```bash
-# Run a script with a specific Python version
-runx --with python@3.12 -- python3 train_model.py
+# Latest stable Python
+runx --with python -- python3 --version
 
-# Use pip in an isolated environment
-runx --with python@3.11 -- pip install requests && python3 fetch.py
+# Django
+runx --with python -- pip install django && django-admin startproject mysite
 
-# Test across Python versions
+# FastAPI
+runx --with python@3.12 -- pip install "fastapi[standard]" && uvicorn main:app
+
+# Data science
+runx --with python@3.11 -- pip install pandas numpy && python3 analyze.py
+
+# Flask
+runx --with python -- pip install flask && python3 app.py
+
+# Test across versions
 runx --with python@3.11 -- pytest
 runx --with python@3.12 -- pytest
+runx --with python@3.13 -- pytest
 ```
 
 </details>
@@ -75,30 +99,47 @@ runx --with python@3.12 -- pytest
 <summary><b>Go</b> — any Go version, zero goenv</summary>
 
 ```bash
+# Latest stable Go
+runx --with go -- go version
+
 # Build and run
-runx --with go@1 -- go run main.go
+runx --with go -- go run main.go
+
+# Gin web framework
+runx --with go -- go run github.com/gin-gonic/gin/examples/basic
 
 # Test with a specific Go version
 runx --with go@1.22 -- go test ./...
 
-# Build a binary
-runx --with go@1 -- go build -o myapp .
+# Build a static binary
+runx --with go -- go build -ldflags="-s -w" -o myapp .
+
+# Hugo static site generator
+runx --with go -- go run github.com/gohugoio/hugo@latest new site mysite
 ```
 
 </details>
 
 <details>
-<summary><b>Deno</b> — try Deno instantly</summary>
+<summary><b>Deno</b> — secure TypeScript runtime</summary>
 
 ```bash
-# Run a remote script
-runx --with deno@2 -- deno run https://examples.deno.land/hello-world.ts
+# Latest Deno — try it instantly
+runx --with deno -- deno --version
 
-# Run a local TypeScript file
-runx --with deno@2 -- deno run --allow-net server.ts
+# Run TypeScript directly
+runx --with deno -- deno run server.ts
 
-# Use Deno's built-in formatter
+# Fresh web framework
+runx --with deno -- deno run -A https://fresh.deno.dev my-fresh-app
+
+# Deno's built-in tools
 runx --with deno -- deno fmt
+runx --with deno -- deno lint
+runx --with deno -- deno test
+
+# Run remote scripts safely
+runx --with deno -- deno run --allow-net https://examples.deno.land/hello-world.ts
 ```
 
 </details>
@@ -107,48 +148,76 @@ runx --with deno -- deno fmt
 <summary><b>Bun</b> — blazing-fast JavaScript runtime</summary>
 
 ```bash
-# Run a script with Bun
-runx --with bun@1 -- bun run index.ts
+# Latest Bun
+runx --with bun -- bun --version
 
-# Install dependencies and run
-runx --with bun@1 -- bun install && bun run dev
+# Run TypeScript with zero config
+runx --with bun -- bun run index.ts
 
-# Use bunx (like npx)
-runx --with bun@1 -- bunx cowsay "hello from bun"
+# Elysia (Bun-native web framework)
+runx --with bun -- bun create elysia my-app && cd my-app && bun run dev
+
+# Install and run — faster than npm
+runx --with bun -- bun install && bun run dev
+
+# Use bunx (like npx, but faster)
+runx --with bun -- bunx cowsay "hello from bun"
+runx --with bun -- bunx prisma generate
 ```
 
 </details>
 
 <details>
-<summary><b>Ruby</b> — prebuilt Ruby, no compilation</summary>
+<summary><b>Ruby</b> — prebuilt Ruby, no compilation wait</summary>
 
 ```bash
-# Run a Ruby script
-runx --with ruby@3 -- ruby -e "puts 'Ruby ' + RUBY_VERSION"
+# Latest stable Ruby
+runx --with ruby -- ruby -v
 
-# Run a Rake task
+# Ruby on Rails
+runx --with ruby -- gem install rails && rails new myapp
+runx --with ruby@3.3 -- rails server
+
+# Sinatra
+runx --with ruby -- gem install sinatra && ruby app.rb
+
+# Jekyll static site
+runx --with ruby -- gem install jekyll && jekyll new myblog
+
+# Run tests with RSpec
+runx --with ruby -- gem install rspec && rspec
+
+# Rake tasks
 runx --with ruby@3 -- gem install rake && rake build
-
-# Test with a specific Ruby version
-runx --with ruby@3.3 -- ruby test/run_tests.rb
 ```
 
 </details>
 
 <details>
-<summary><b>Java</b> — any JDK version via Adoptium</summary>
+<summary><b>Java</b> — any JDK version via Adoptium (JAVA_HOME set automatically)</summary>
 
 ```bash
-# Check Java version
-runx --with java@21 -- java -version
+# Latest LTS Java
+runx --with java -- java -version
 
 # Compile and run
-runx --with java@21 -- javac Main.java
-runx --with java@21 -- java Main
+runx --with java@21 -- javac Main.java && java Main
 
-# Use with Maven or Gradle (JAVA_HOME is set automatically)
-runx --with java@17 -- ./mvnw clean package
+# Spring Boot with Maven
+runx --with java@21 -- ./mvnw spring-boot:run
+
+# Gradle build
 runx --with java@21 -- ./gradlew build
+
+# Quarkus
+runx --with java@21 -- ./mvnw quarkus:dev
+
+# Test across LTS versions
+runx --with java@17 -- ./mvnw test
+runx --with java@21 -- ./mvnw test
+
+# jshell REPL
+runx --with java -- jshell
 ```
 
 </details>
@@ -157,14 +226,23 @@ runx --with java@21 -- ./gradlew build
 <summary><b>Rust</b> — standalone toolchain, no rustup needed</summary>
 
 ```bash
-# Check Rust version
-runx --with rust@1 -- rustc --version
+# Latest stable Rust
+runx --with rust -- rustc --version
 
 # Build a project
-runx --with rust@1 -- cargo build --release
+runx --with rust -- cargo build --release
 
 # Create and run a new project
-runx --with rust@1 -- cargo init hello && cd hello && cargo run
+runx --with rust -- cargo init hello && cd hello && cargo run
+
+# Actix Web
+runx --with rust -- cargo add actix-web && cargo run
+
+# Run tests
+runx --with rust -- cargo test
+
+# Clippy + fmt
+runx --with rust -- cargo clippy && cargo fmt --check
 ```
 
 </details>
@@ -173,11 +251,14 @@ runx --with rust@1 -- cargo init hello && cd hello && cargo run
 <summary><b>Multiple runtimes</b> — download in parallel</summary>
 
 ```bash
-# Use Node and Python together
-runx --with node@22 --with python@3.12 -- node orchestrate.js
+# Full-stack: Node frontend + Python backend
+runx --with node@22 --with python@3.12 -- npm run fullstack
 
-# Full-stack build: Java backend + Node frontend
+# Java backend + Node frontend
 runx --with java@21 --with node@22 -- ./build-all.sh
+
+# Polyglot testing
+runx --with go --with rust -- ./integration-tests.sh
 ```
 
 </details>
