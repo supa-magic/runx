@@ -7,6 +7,8 @@ mod download;
 mod environment;
 mod error;
 #[allow(unused)]
+mod executor;
+#[allow(unused)]
 mod platform;
 #[allow(unused)]
 mod provider;

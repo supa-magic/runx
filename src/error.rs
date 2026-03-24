@@ -1,6 +1,7 @@
 use crate::cache::CacheError;
 use crate::download::DownloadError;
 use crate::environment::EnvironmentError;
+use crate::executor::ExecutorError;
 use crate::provider::ProviderError;
 
 /// Errors that can occur during runx execution.
@@ -40,4 +41,8 @@ pub enum RunxError {
     /// An environment construction error.
     #[error(transparent)]
     Environment(#[from] EnvironmentError),
+
+    /// A command execution error.
+    #[error(transparent)]
+    Executor(#[from] ExecutorError),
 }
