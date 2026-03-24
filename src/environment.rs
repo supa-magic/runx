@@ -8,6 +8,24 @@ use crate::platform::Platform;
 /// These are non-tool-specific variables needed for basic process operation.
 const BASELINE_VARS: &[&str] = &["HOME", "USER", "LOGNAME", "TERM", "LANG", "SHELL", "TMPDIR"];
 
+/// Windows-critical variables that must always be inherited on Windows.
+///
+/// Without these, many Windows programs fail silently or crash.
+#[cfg(target_os = "windows")]
+const WINDOWS_BASELINE_VARS: &[&str] = &[
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "SYSTEMDRIVE",
+];
+
 /// Prefixes for environment variables that are inherited when they match.
 const BASELINE_PREFIXES: &[&str] = &["LC_", "XDG_"];
 
@@ -143,6 +161,14 @@ impl Environment {
                 .any(|prefix| key.starts_with(prefix))
             {
                 vars.insert(key, value);
+            }
+        }
+
+        // On Windows, inherit critical system variables
+        #[cfg(target_os = "windows")]
+        for var_name in WINDOWS_BASELINE_VARS {
+            if let Ok(value) = std::env::var(var_name) {
+                vars.insert(var_name.to_string(), value);
             }
         }
 

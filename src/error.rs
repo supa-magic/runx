@@ -58,6 +58,14 @@ pub enum RunxError {
     /// An I/O error during interactive prompting.
     #[error("I/O error: {0}")]
     Io(std::io::Error),
+
+    /// Cannot determine the home directory.
+    #[error("cannot determine home directory")]
+    NoHomeDir,
+
+    /// A plugin operation error.
+    #[error("plugin error: {0}")]
+    Plugin(String),
 }
 
 #[cfg(test)]

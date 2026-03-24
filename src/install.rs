@@ -6,14 +6,10 @@ use crate::download::download_and_install;
 use crate::error::RunxError;
 use crate::platform::Target;
 use crate::provider;
-use crate::version::VersionSpec;
 
 /// Return the global bin directory at `~/.runx/bin/`.
 fn bin_dir() -> Result<PathBuf, RunxError> {
-    let home = dirs::home_dir().ok_or(RunxError::NoCwd(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "cannot determine home directory",
-    )))?;
+    let home = dirs::home_dir().ok_or(RunxError::NoHomeDir)?;
     Ok(home.join(".runx").join("bin"))
 }
 
@@ -67,16 +63,7 @@ async fn install_tool(
 ) -> Result<(), RunxError> {
     let provider = provider::get_provider(&spec.name)?;
 
-    let version_spec = match &spec.version {
-        Some(v) => {
-            v.parse::<VersionSpec>()
-                .map_err(|e| provider::ProviderError::ResolutionFailed {
-                    tool: spec.name.clone(),
-                    reason: e,
-                })?
-        }
-        None => VersionSpec::Latest,
-    };
+    let version_spec = spec.version_spec()?;
 
     eprintln!("Resolving {}@{}...", spec.name, version_spec);
     let version = provider.resolve_version(&version_spec, target)?;
@@ -206,9 +193,12 @@ pub fn uninstall(spec: &ToolSpec) -> Result<(), RunxError> {
         let name = entry.file_name().to_string_lossy().to_string();
 
         if let Ok(target) = std::fs::read_link(entry.path()) {
-            let target_str = target.display().to_string();
-            // Check if the symlink points into this tool's cache
-            if target_str.contains(&format!("/{}/", spec.name)) {
+            // Check if the symlink points into this tool's cache directory
+            // Use path components for cross-platform matching (works with / and \)
+            if target
+                .components()
+                .any(|c| c.as_os_str().to_str().is_some_and(|s| s == spec.name))
+            {
                 std::fs::remove_file(entry.path()).map_err(RunxError::Io)?;
                 removed.push(name);
             }

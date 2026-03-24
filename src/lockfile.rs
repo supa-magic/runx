@@ -7,7 +7,6 @@ use crate::cli::ToolSpec;
 use crate::error::RunxError;
 use crate::platform::Target;
 use crate::provider;
-use crate::version::VersionSpec;
 
 const LOCKFILE_NAME: &str = ".runxrc.lock";
 
@@ -50,16 +49,7 @@ pub fn generate_lockfile(tools: &[ToolSpec], target: &Target) -> Result<Lockfile
     for spec in tools {
         let prov = provider::get_provider(&spec.name)?;
 
-        let version_spec = match &spec.version {
-            Some(v) => {
-                v.parse::<VersionSpec>()
-                    .map_err(|e| provider::ProviderError::ResolutionFailed {
-                        tool: spec.name.clone(),
-                        reason: e,
-                    })?
-            }
-            None => VersionSpec::Latest,
-        };
+        let version_spec = spec.version_spec()?;
 
         eprintln!("Resolving {}@{}...", spec.name, version_spec);
         let version = prov.resolve_version(&version_spec, target)?;

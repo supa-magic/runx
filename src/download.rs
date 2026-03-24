@@ -132,24 +132,35 @@ fn extract_tar_gz(archive_path: &Path, dest_dir: &Path) -> Result<(), DownloadEr
 }
 
 fn extract_tar_xz(archive_path: &Path, dest_dir: &Path) -> Result<(), DownloadError> {
-    // xz2 crate would be needed for .tar.xz; for now use a subprocess fallback
-    // since xz2 adds significant compile time and tar.xz is less common.
-    let status = std::process::Command::new("tar")
-        .args(["xf", &archive_path.to_string_lossy(), "-C"])
-        .arg(dest_dir)
-        .status()
-        .map_err(|e| DownloadError::Extraction {
-            path: archive_path.to_path_buf(),
-            reason: format!("failed to run tar: {e}"),
-        })?;
-
-    if !status.success() {
+    #[cfg(target_os = "windows")]
+    {
         return Err(DownloadError::Extraction {
             path: archive_path.to_path_buf(),
-            reason: format!("tar exited with status {status}"),
+            reason: "tar.xz extraction is not supported on Windows. The tool provider should use .zip or .tar.gz instead.".to_string(),
         });
     }
-    Ok(())
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let status = std::process::Command::new("tar")
+            .arg("xf")
+            .arg(archive_path)
+            .arg("-C")
+            .arg(dest_dir)
+            .status()
+            .map_err(|e| DownloadError::Extraction {
+                path: archive_path.to_path_buf(),
+                reason: format!("failed to run tar: {e}"),
+            })?;
+
+        if !status.success() {
+            return Err(DownloadError::Extraction {
+                path: archive_path.to_path_buf(),
+                reason: format!("tar exited with status {status}"),
+            });
+        }
+        Ok(())
+    }
 }
 
 fn extract_zip(archive_path: &Path, dest_dir: &Path) -> Result<(), DownloadError> {
@@ -344,6 +355,9 @@ pub enum DownloadError {
 
     #[error("checksum mismatch: expected {expected}, got {actual}")]
     ChecksumMismatch { expected: String, actual: String },
+
+    #[error("multiple download failures:\n  {}", errors.join("\n  "))]
+    Multiple { errors: Vec<String> },
 }
 
 #[cfg(test)]

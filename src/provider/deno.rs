@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-
 use crate::platform::{Arch, Platform, Target};
 use crate::version::VersionSpec;
 
@@ -11,11 +9,7 @@ use super::{
     resolve_from_candidates,
 };
 
-/// GitHub release entry for Deno.
-#[derive(Debug, Deserialize)]
-struct GitHubRelease {
-    tag_name: String,
-}
+use super::SimpleGitHubRelease as GitHubRelease;
 
 /// Deno tool provider.
 ///

@@ -102,6 +102,14 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
     })
 }
 
+/// A simple GitHub release entry with just the tag name.
+///
+/// Shared by Deno and Bun providers which both fetch releases from GitHub.
+#[derive(Debug, serde::Deserialize)]
+pub struct SimpleGitHubRelease {
+    pub tag_name: String,
+}
+
 /// Collect unique stable versions from an iterator of optional versions.
 ///
 /// Filters out pre-release versions and duplicates. Uses a HashSet

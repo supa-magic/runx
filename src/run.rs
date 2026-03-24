@@ -12,7 +12,6 @@ use crate::error::RunxError;
 use crate::executor;
 use crate::platform::Target;
 use crate::provider::{self, ArchiveFormat, Provider};
-use crate::version::VersionSpec;
 
 /// Dispatch CLI arguments to the appropriate subcommand handler.
 pub async fn run(cli: Cli) -> Result<(), RunxError> {
@@ -131,15 +130,7 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
     for tool_spec in &cli.tools {
         let provider = provider::get_provider(&tool_spec.name)?;
 
-        let version_spec = match &tool_spec.version {
-            Some(v) => v.parse::<VersionSpec>().map_err(|e| {
-                crate::provider::ProviderError::ResolutionFailed {
-                    tool: tool_spec.name.clone(),
-                    reason: e,
-                }
-            })?,
-            None => VersionSpec::Latest,
-        };
+        let version_spec = tool_spec.version_spec()?;
 
         if !cli.quiet {
             eprintln!("Resolving {}@{}...", tool_spec.name, version_spec);
@@ -230,10 +221,7 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
 
         if !errors.is_empty() {
             return Err(RunxError::Download(
-                crate::download::DownloadError::Extraction {
-                    path: PathBuf::from("parallel downloads"),
-                    reason: errors.join("; "),
-                },
+                crate::download::DownloadError::Multiple { errors },
             ));
         }
     }

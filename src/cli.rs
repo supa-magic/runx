@@ -39,6 +39,23 @@ impl FromStr for ToolSpec {
     }
 }
 
+impl ToolSpec {
+    /// Parse the version string into a `VersionSpec`, defaulting to `Latest`.
+    pub fn version_spec(
+        &self,
+    ) -> Result<crate::version::VersionSpec, crate::provider::ProviderError> {
+        match &self.version {
+            Some(v) => v.parse::<crate::version::VersionSpec>().map_err(|e| {
+                crate::provider::ProviderError::ResolutionFailed {
+                    tool: self.name.clone(),
+                    reason: e,
+                }
+            }),
+            None => Ok(crate::version::VersionSpec::Latest),
+        }
+    }
+}
+
 impl fmt::Display for ToolSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.version {

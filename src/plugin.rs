@@ -10,9 +10,7 @@ use crate::version::VersionSpec;
 
 /// Plugin directory at `~/.runx/plugins/`.
 fn plugins_dir() -> Result<PathBuf, RunxError> {
-    let home = dirs::home_dir().ok_or(RunxError::Io(std::io::Error::other(
-        "cannot determine home directory",
-    )))?;
+    let home = dirs::home_dir().ok_or(RunxError::NoHomeDir)?;
     Ok(home.join(".runx").join("plugins"))
 }
 
@@ -171,15 +169,15 @@ pub fn run_plugin_command(action: &str, arg: Option<&str>) -> Result<(), RunxErr
     match action {
         "list" => list_plugins(),
         "add" => {
-            let url = arg.ok_or(RunxError::Io(std::io::Error::other(
-                "usage: runx plugin add <url-or-path>",
-            )))?;
+            let url = arg.ok_or(RunxError::Plugin(
+                "usage: runx plugin add <url-or-path>".to_string(),
+            ))?;
             add_plugin(url)
         }
         "remove" => {
-            let name = arg.ok_or(RunxError::Io(std::io::Error::other(
-                "usage: runx plugin remove <name>",
-            )))?;
+            let name = arg.ok_or(RunxError::Plugin(
+                "usage: runx plugin remove <name>".to_string(),
+            ))?;
             remove_plugin(name)
         }
         _ => {
@@ -227,11 +225,8 @@ fn add_plugin(source: &str) -> Result<(), RunxError> {
 
     // Validate the manifest
     let content = std::fs::read_to_string(source_path).map_err(RunxError::Io)?;
-    let manifest: PluginManifest = toml::from_str(&content).map_err(|e| {
-        RunxError::Io(std::io::Error::other(format!(
-            "invalid plugin manifest: {e}"
-        )))
-    })?;
+    let manifest: PluginManifest = toml::from_str(&content)
+        .map_err(|e| RunxError::Plugin(format!("invalid plugin manifest: {e}")))?;
 
     let dir = plugins_dir()?;
     std::fs::create_dir_all(&dir).map_err(RunxError::Io)?;
