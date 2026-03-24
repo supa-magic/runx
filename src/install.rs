@@ -184,7 +184,10 @@ pub fn uninstall(spec: &ToolSpec) -> Result<(), RunxError> {
         return Ok(());
     }
 
-    // Find symlinks that point into this tool's cache directory
+    // Build the expected cache prefix: ~/.runx/cache/<tool>/
+    let cache = crate::cache::Cache::new()?;
+    let cache_tool_dir = cache.root().join(&spec.name);
+
     let entries = std::fs::read_dir(&bin).map_err(RunxError::Io)?;
     let mut removed = Vec::new();
 
@@ -194,11 +197,7 @@ pub fn uninstall(spec: &ToolSpec) -> Result<(), RunxError> {
 
         if let Ok(target) = std::fs::read_link(entry.path()) {
             // Check if the symlink points into this tool's cache directory
-            // Use path components for cross-platform matching (works with / and \)
-            if target
-                .components()
-                .any(|c| c.as_os_str().to_str().is_some_and(|s| s == spec.name))
-            {
+            if target.starts_with(&cache_tool_dir) {
                 std::fs::remove_file(entry.path()).map_err(RunxError::Io)?;
                 removed.push(name);
             }
