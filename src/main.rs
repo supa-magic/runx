@@ -3,6 +3,8 @@ mod cache;
 mod cli;
 #[allow(unused)]
 mod download;
+#[allow(unused)]
+mod environment;
 mod error;
 #[allow(unused)]
 mod platform;
