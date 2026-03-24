@@ -411,111 +411,197 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0"]
 
 ## Self-Contained Scripts
 
-Scripts that **bring their own runtime**. Add a shebang line — the runtime downloads on first run.
+Scripts that **bring their own runtime**. Copy any of these, `chmod +x`, and run — the runtime downloads automatically on first execution.
 
-<details>
-<summary><b>deploy.js</b> — Node.js deployment script</summary>
+<details open>
+<summary><b>serve.js</b> — instant file server (Node.js)</summary>
 
 ```js
 #!/usr/bin/env -S runx --with node@22 --
-const { execSync } = require("child_process");
-const branch = execSync("git branch --show-current").toString().trim();
+// serve.js — serve the current directory over HTTP
+// Usage: ./serve.js [port]
 
-if (branch !== "main") {
-  console.error(`Refusing to deploy from branch '${branch}'`);
-  process.exit(1);
-}
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
 
-execSync("npm run build", { stdio: "inherit" });
-execSync("npm run deploy", { stdio: "inherit" });
-console.log("Done!");
+const port = process.argv[2] || 3000;
+const dir = process.cwd();
+
+const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+  ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg" };
+
+http.createServer((req, res) => {
+  const file = path.join(dir, req.url === "/" ? "index.html" : req.url);
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); return res.end("Not found"); }
+    res.writeHead(200, { "Content-Type": mime[path.extname(file)] || "text/plain" });
+    res.end(data);
+  });
+  console.log(`${req.method} ${req.url}`);
+}).listen(port, () => console.log(`Serving ${dir} at http://localhost:${port}`));
+```
+
+```bash
+chmod +x serve.js
+./serve.js           # Serves current directory on :3000
+./serve.js 8080      # Custom port
 ```
 
 </details>
 
 <details>
-<summary><b>analyze.py</b> — Python data analysis</summary>
+<summary><b>loc.py</b> — count lines of code (Python)</summary>
 
 ```python
 #!/usr/bin/env -S runx --with python@3.12 --
-import csv, sys, statistics
+# loc.py — count lines of code by language
+# Usage: ./loc.py [directory]
 
-with open(sys.argv[1]) as f:
-    rows = list(csv.DictReader(f))
+import os, sys
+from collections import defaultdict
 
-print(f"Rows: {len(rows)}")
-for col in rows[0]:
-    try:
-        vals = [float(r[col]) for r in rows]
-        print(f"{col}: mean={statistics.mean(vals):.2f}, median={statistics.median(vals):.2f}")
-    except ValueError:
-        print(f"{col}: {len(set(r[col] for r in rows))} unique values")
+exts = {".py": "Python", ".js": "JavaScript", ".ts": "TypeScript", ".rs": "Rust",
+        ".go": "Go", ".rb": "Ruby", ".java": "Java", ".c": "C", ".cpp": "C++",
+        ".html": "HTML", ".css": "CSS", ".sh": "Shell", ".toml": "TOML", ".yaml": "YAML"}
+
+root = sys.argv[1] if len(sys.argv) > 1 else "."
+stats = defaultdict(lambda: {"files": 0, "lines": 0})
+skip = {".git", "node_modules", "target", "__pycache__", ".venv", "dist", "build"}
+
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d not in skip]
+    for f in filenames:
+        ext = os.path.splitext(f)[1]
+        if ext in exts:
+            try:
+                lines = sum(1 for _ in open(os.path.join(dirpath, f)))
+                stats[exts[ext]]["files"] += 1
+                stats[exts[ext]]["lines"] += lines
+            except (OSError, UnicodeDecodeError):
+                pass
+
+if not stats:
+    print("No source files found.")
+    sys.exit(0)
+
+print(f"{'Language':<14} {'Files':>6} {'Lines':>8}")
+print(f"{'─' * 14} {'─' * 6} {'─' * 8}")
+for lang, s in sorted(stats.items(), key=lambda x: -x[1]["lines"]):
+    print(f"{lang:<14} {s['files']:>6} {s['lines']:>8}")
+print(f"{'─' * 14} {'─' * 6} {'─' * 8}")
+print(f"{'Total':<14} {sum(s['files'] for s in stats.values()):>6} {sum(s['lines'] for s in stats.values()):>8}")
+```
+
+```bash
+chmod +x loc.py
+./loc.py             # Count lines in current directory
+./loc.py ~/projects  # Count lines in any directory
 ```
 
 </details>
 
 <details>
-<summary><b>ask.py</b> — CLI AI assistant (uses Anthropic API)</summary>
-
-```python
-#!/usr/bin/env -S runx --with python@3.12 --inherit-env --
-# ask.py — ask Claude from the command line
-# Usage: ./ask.py "explain this error" < traceback.txt
-
-import sys
-try:
-    import anthropic
-except ImportError:
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "anthropic", "-q"])
-    import anthropic
-
-prompt = sys.argv[1] if len(sys.argv) > 1 else "Summarize this input"
-stdin = sys.stdin.read() if not sys.stdin.isatty() else ""
-
-client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY from env
-msg = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": f"{prompt}\n\n{stdin}".strip()}],
-)
-print(msg.content[0].text)
-```
-
-</details>
-
-<details>
-<summary>More: health.rb, server.ts</summary>
-
-```ruby
-#!/usr/bin/env -S runx --with ruby@3 --
-# health.rb — check if services are responding
-require "net/http"
-require "uri"
-
-{"API" => "https://api.example.com/health", "Docs" => "https://docs.example.com"}.each do |name, url|
-  res = Net::HTTP.get_response(URI(url)) rescue nil
-  puts "#{name}: #{res&.code&.to_i.to_i < 400 ? 'OK' : 'DOWN'}"
-end
-```
+<summary><b>server.ts</b> — HTTP server with routing (Deno)</summary>
 
 ```ts
 #!/usr/bin/env -S runx --with deno --
-// server.ts — single-file HTTP server
+// server.ts — HTTP server with JSON API
+// Usage: ./server.ts [port]
+
 const port = parseInt(Deno.args[0] ?? "3000");
+
 Deno.serve({ port }, (req: Request) => {
-  console.log(`${req.method} ${new URL(req.url).pathname}`);
-  return new Response(`Hello from Deno on port ${port}!\n`);
+  const url = new URL(req.url);
+  console.log(`${req.method} ${url.pathname}`);
+
+  if (url.pathname === "/api/time") {
+    return Response.json({ time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  }
+  if (url.pathname === "/api/echo" && req.method === "POST") {
+    return req.text().then(body => Response.json({ echo: body }));
+  }
+  if (url.pathname === "/") {
+    return new Response("<h1>runx + Deno</h1><p>Try <a href='/api/time'>/api/time</a></p>", { headers: { "Content-Type": "text/html" } });
+  }
+  return new Response("Not found", { status: 404 });
 });
+
+console.log(`Server running at http://localhost:${port}`);
+```
+
+```bash
+chmod +x server.ts
+./server.ts          # Start server on :3000
+curl localhost:3000/api/time
 ```
 
 </details>
 
-```bash
-chmod +x deploy.js analyze.py health.rb server.ts
-./deploy.js                    # Downloads Node 22 on first run, then deploys
-./analyze.py sales.csv         # Downloads Python 3.12, analyzes the CSV
+<details>
+<summary><b>sysinfo.rb</b> — system info report (Ruby)</summary>
+
+```ruby
+#!/usr/bin/env -S runx --with ruby@3 --
+# sysinfo.rb — print system information
+
+info = {
+  "Hostname"     => `hostname`.strip,
+  "OS"           => RUBY_PLATFORM,
+  "Ruby"         => RUBY_VERSION,
+  "CPU Cores"    => (File.read("/proc/cpuinfo").scan(/^processor/i).length rescue `sysctl -n hw.ncpu`.strip),
+  "Memory"       => (File.read("/proc/meminfo").match(/MemTotal:\s+(\d+)/)[1].to_i / 1024 rescue `sysctl -n hw.memsize`.strip.to_i / 1024 / 1024).to_s + " MB",
+  "Disk Free"    => `df -h /`.split("\n").last.split[3],
+  "Uptime"       => `uptime`.strip.match(/(up.*?),\s*\d+ user/)[1],
+  "Shell"        => ENV["SHELL"] || "unknown",
+  "User"         => ENV["USER"] || "unknown",
+  "Working Dir"  => Dir.pwd,
+}
+
+max_key = info.keys.map(&:length).max
+info.each { |k, v| puts "  #{k.ljust(max_key)}  #{v}" }
 ```
+
+```bash
+chmod +x sysinfo.rb
+./sysinfo.rb         # Prints system info — no gems needed
+```
+
+</details>
+
+<details>
+<summary><b>json.js</b> — JSON formatter from stdin (Node.js)</summary>
+
+```js
+#!/usr/bin/env -S runx --with node --
+// json.js — pretty-print and query JSON from stdin or file
+// Usage: cat data.json | ./json.js
+//        ./json.js < package.json
+//        curl -s api.example.com | ./json.js
+
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const data = JSON.parse(input);
+    console.log(JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error(`Invalid JSON: ${e.message}`);
+    process.exit(1);
+  }
+});
+```
+
+```bash
+chmod +x json.js
+echo '{"name":"runx","version":"0.4.0"}' | ./json.js
+curl -s https://api.github.com/repos/supa-magic/runx | ./json.js
+```
+
+</details>
+
+Every script above works immediately after `chmod +x` — no project setup, no `npm install`, no API keys. Share them with your team or drop them in any repo.
 
 ---
 
