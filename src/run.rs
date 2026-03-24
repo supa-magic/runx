@@ -36,6 +36,9 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
         Some(Command::Uninstall { tool }) => {
             crate::install::uninstall(&tool)?;
         }
+        Some(Command::Update { tool }) => {
+            crate::update::run(tool, cli.dry_run).await?;
+        }
         Some(Command::Completions { shell }) => {
             generate_completions(shell);
         }

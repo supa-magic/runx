@@ -12,6 +12,7 @@ mod list;
 mod platform;
 mod provider;
 mod run;
+mod update;
 mod version;
 
 use clap::Parser;

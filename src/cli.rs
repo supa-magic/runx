@@ -193,6 +193,15 @@ pub enum Command {
         tool: ToolSpec,
     },
 
+    /// Update cached tools to the latest patch version
+    #[command(
+        after_help = "Examples:\n  runx update                        Update all cached tools\n  runx update node                   Update only Node.js"
+    )]
+    Update {
+        /// Specific tool to update (e.g. node)
+        tool: Option<ToolSpec>,
+    },
+
     /// Generate shell completions for bash, zsh, or fish
     #[command(
         after_help = "Examples:\n  runx completions bash > ~/.bash_completion.d/runx\n  runx completions zsh > ~/.zfunc/_runx\n  runx completions fish > ~/.config/fish/completions/runx.fish"
