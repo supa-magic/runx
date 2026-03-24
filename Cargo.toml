@@ -10,7 +10,7 @@ ctrlc = { version = "3", features = ["termination"] }
 dirs = "6"
 flate2 = "1"
 indicatif = "0.17"
-reqwest = { version = "0.12", features = ["stream", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "blocking", "rustls-tls"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
