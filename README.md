@@ -323,42 +323,32 @@ With a `.runxrc.lock`, CI downloads the exact same binaries every run — no ver
 
 ### Docker
 
-Replace complex multi-stage builds with a single `COPY`:
+With a `.runxrc`, your Dockerfile doesn't need `nvm`, `pyenv`, or multi-stage builds:
+
+```toml
+# .runxrc
+tools = ["node@22", "python@3.12"]
+```
 
 ```dockerfile
-# Before: 20+ lines of apt-get, curl, nvm, pyenv...
-# After:
 FROM ubuntu:24.04
-COPY --from=runx /runx /usr/local/bin/runx
-RUN runx --with node@22 -- npm ci
-RUN runx --with node@22 -- npm run build
-CMD ["runx", "--with", "node@22", "--", "node", "server.js"]
+COPY runx /usr/local/bin/runx
+COPY .runxrc .
+
+RUN runx -- npm ci
+RUN runx -- npm run build
+RUN runx -- pip install -r requirements.txt
+
+CMD ["runx", "--", "uvicorn", "main:app", "--host", "0.0.0.0"]
 ```
+
+Same `.runxrc` used by developers, CI, and Docker — versions stay in sync everywhere.
 
 <details>
-<summary><b>Full example: multi-runtime Docker build</b></summary>
+<summary><b>Compare: traditional multi-stage Dockerfile</b></summary>
 
 ```dockerfile
-FROM ubuntu:24.04
-
-# One binary — all runtimes
-COPY runx /usr/local/bin/runx
-
-# Frontend
-RUN runx --with node@22 -- npm ci --prefix frontend
-RUN runx --with node@22 -- npm run build --prefix frontend
-
-# Backend
-RUN runx --with python@3.12 -- pip install -r requirements.txt
-
-# No nvm, no pyenv, no apt-get install nodejs python3
-CMD ["runx", "--with", "python@3.12", "--", "uvicorn", "main:app", "--host", "0.0.0.0"]
-```
-
-Compare to the traditional approach:
-
-```dockerfile
-# Traditional: 40+ lines
+# Without runx: 2 base images, apt-get, version management scattered
 FROM node:22-slim AS frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
