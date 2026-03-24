@@ -11,10 +11,9 @@
   </p>
 </p>
 
-```bash
-$ runx --with node@22 -- node -v
-v22.22.2
-```
+<p align="center">
+  <img src="demo.gif" alt="runx demo" width="800">
+</p>
 
 That's it. Node 22 was downloaded, cached, and your command ran in a fully isolated environment. Your system wasn't touched. Next time, it starts instantly.
 
