@@ -145,11 +145,11 @@ pub struct Cli {
 pub enum Command {
     /// Remove cached tool binaries to reclaim disk space
     #[command(
-        after_help = "Examples:\n  runx clean                         Remove all cached binaries\n  runx clean --tool node             Remove only Node.js caches\n  runx clean --older-than 30d        Remove caches older than 30 days\n  runx clean -y                      Skip confirmation prompt"
+        after_help = "Examples:\n  runx clean                         Remove all cached binaries\n  runx clean java                    Remove all Java caches\n  runx clean java@21                 Remove Java 21.x caches only\n  runx clean java@21.0.10            Remove exact version\n  runx clean --older-than 30d        Remove caches older than 30 days\n  runx clean -y                      Skip confirmation prompt"
     )]
     Clean {
-        /// Remove only caches for this tool
-        #[arg(long, value_name = "NAME")]
+        /// Tool (and optional version) to clean, e.g. `java`, `java@21`, `node@18.19.1`
+        #[arg(value_name = "TOOL[@VERSION]")]
         tool: Option<ToolSpec>,
 
         /// Remove caches older than this duration (e.g. 30d, 7d)

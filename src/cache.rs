@@ -79,6 +79,62 @@ impl Cache {
         Ok(size)
     }
 
+    /// Remove cached versions of a tool matching a version spec.
+    ///
+    /// Uses `VersionSpec` matching: `Major(21)` removes all `21.x.x`,
+    /// `MajorMinor(21, 0)` removes all `21.0.x`, `Exact` removes one version.
+    pub fn clean_version(
+        &self,
+        tool: &str,
+        spec: &crate::version::VersionSpec,
+    ) -> Result<u64, CacheError> {
+        let tool_dir = self.root.join(tool);
+        if !tool_dir.exists() {
+            return Ok(0);
+        }
+
+        let versions = self.list_versions(tool)?;
+        let mut freed = 0u64;
+
+        for ver_str in &versions {
+            let Ok(ver) = ver_str.parse::<semver::Version>() else {
+                continue;
+            };
+            if spec.matches(&ver) {
+                let ver_dir = tool_dir.join(ver_str);
+                freed += dir_size(&ver_dir);
+                std::fs::remove_dir_all(&ver_dir).map_err(|e| CacheError::Io {
+                    path: ver_dir,
+                    source: e,
+                })?;
+            }
+        }
+
+        // Clean up empty tool directory
+        if self.list_versions(tool)?.is_empty() && tool_dir.exists() {
+            let _ = std::fs::remove_dir(&tool_dir);
+        }
+
+        Ok(freed)
+    }
+
+    /// List cached versions matching a version spec (for dry-run display).
+    pub fn matching_versions(
+        &self,
+        tool: &str,
+        spec: &crate::version::VersionSpec,
+    ) -> Result<Vec<String>, CacheError> {
+        let versions = self.list_versions(tool)?;
+        Ok(versions
+            .into_iter()
+            .filter(|v| {
+                v.parse::<semver::Version>()
+                    .map(|ver| spec.matches(&ver))
+                    .unwrap_or(false)
+            })
+            .collect())
+    }
+
     /// Remove all cached tools.
     pub fn clean_all(&self) -> Result<u64, CacheError> {
         if !self.root.exists() {

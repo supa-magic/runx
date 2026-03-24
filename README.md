@@ -586,7 +586,9 @@ runx list                      # All tools and cache status
 runx list --cached             # Cached versions with disk sizes
 runx list --cached java        # Cached versions for a specific tool
 runx clean                     # Remove everything (with confirmation)
-runx clean --tool node         # Remove only Node.js caches
+runx clean node                # Remove all Node.js caches
+runx clean java@21             # Remove only Java 21.x versions
+runx clean java@21.0.10        # Remove exact version
 runx clean --older-than 30d    # Remove stale versions
 ```
 

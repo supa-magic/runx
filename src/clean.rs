@@ -62,15 +62,57 @@ fn clean_all(cache: &Cache, yes: bool, dry_run: bool) -> Result<(), RunxError> {
     Ok(())
 }
 
-/// Remove all cached versions of a specific tool.
+/// Remove cached versions of a specific tool, optionally filtered by version.
 fn clean_tool(cache: &Cache, spec: &ToolSpec, yes: bool, dry_run: bool) -> Result<(), RunxError> {
-    if spec.version.is_some() {
-        eprintln!(
-            "Warning: version specifier ignored. `clean --tool {}` removes all cached versions of {}.",
-            spec, spec.name
+    // If a version is specified, clean only matching versions
+    if let Some(ref version_str) = spec.version {
+        let version_spec = spec.version_spec()?;
+        let matching = cache.matching_versions(&spec.name, &version_spec)?;
+
+        if matching.is_empty() {
+            println!(
+                "No cached versions of {} matching {}.",
+                spec.name, version_str
+            );
+            return Ok(());
+        }
+
+        let count = matching.len();
+        let verb = if dry_run {
+            "Would remove"
+        } else {
+            "Will remove"
+        };
+        println!(
+            "{verb} {count} version{} of {}:",
+            if count == 1 { "" } else { "s" },
+            spec.name
         );
+        for v in &matching {
+            println!("  {}@{}", spec.name, v);
+        }
+
+        if dry_run {
+            return Ok(());
+        }
+
+        if !yes
+            && !confirm(&format!(
+                "Remove {} matching version{}?",
+                count,
+                if count == 1 { "" } else { "s" }
+            ))?
+        {
+            println!("Aborted.");
+            return Ok(());
+        }
+
+        let freed = cache.clean_version(&spec.name, &version_spec)?;
+        println!("Freed {}.", format_size(freed));
+        return Ok(());
     }
 
+    // No version specified — remove all versions of this tool
     let tools = cache.list_cached()?;
     let tool = tools.iter().find(|t| t.name == spec.name);
 

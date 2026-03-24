@@ -128,8 +128,7 @@ mod tests {
 
     #[test]
     fn test_parse_clean_with_args() {
-        let cli = Cli::try_parse_from(["runx", "clean", "--tool", "node", "--older-than", "30d"])
-            .unwrap();
+        let cli = Cli::try_parse_from(["runx", "clean", "node", "--older-than", "30d"]).unwrap();
         let Some(Command::Clean {
             tool,
             older_than,

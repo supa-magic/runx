@@ -466,8 +466,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_clean_with_args() {
-        let cli = Cli::try_parse_from(["runx", "clean", "--tool", "node", "--older-than", "30d"])
-            .unwrap();
+        let cli = Cli::try_parse_from(["runx", "clean", "node", "--older-than", "30d"]).unwrap();
         assert!(run(cli).await.is_ok());
     }
 
