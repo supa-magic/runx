@@ -29,19 +29,158 @@ That's it. Node 22 was downloaded, cached, and your command ran in a fully isola
 Sound familiar? Here's how runx eliminates that:
 
 ```bash
-# Test your app against Node 18 AND Node 22 — no nvm, no switching
+runx --with node@22 -- npm test
+runx --with python@3.12 -- python3 app.py
+runx --with java@21 -- javac Main.java && java Main
+runx --with ruby@3 -- ruby -e "puts 'hello from Ruby'"
+runx --with rust@1 -- cargo init hello && cd hello && cargo run
+runx --with go@1 -- go run main.go
+```
+
+<details>
+<summary><b>Node.js</b> — run any version without nvm</summary>
+
+```bash
+# Test against multiple versions
 runx --with node@18 -- npm test
 runx --with node@22 -- npm test
 
-# Run a Python script without touching your system Python
+# Run a script with a specific Node version
+runx --with node@20 -- node server.js
+
+# Use with npm, npx, or any Node tooling
+runx --with node@22 -- npx create-react-app my-app
+```
+
+</details>
+
+<details>
+<summary><b>Python</b> — isolated Python without pyenv or conda</summary>
+
+```bash
+# Run a script with a specific Python version
 runx --with python@3.12 -- python3 train_model.py
 
-# Try Deno without installing it
-runx --with deno -- deno run https://examples.deno.land/hello-world.ts
+# Use pip in an isolated environment
+runx --with python@3.11 -- pip install requests && python3 fetch.py
 
-# Use multiple runtimes together — they download in parallel
-runx --with node@22 --with python@3.12 -- node orchestrate.js
+# Test across Python versions
+runx --with python@3.11 -- pytest
+runx --with python@3.12 -- pytest
 ```
+
+</details>
+
+<details>
+<summary><b>Go</b> — any Go version, zero goenv</summary>
+
+```bash
+# Build and run
+runx --with go@1 -- go run main.go
+
+# Test with a specific Go version
+runx --with go@1.22 -- go test ./...
+
+# Build a binary
+runx --with go@1 -- go build -o myapp .
+```
+
+</details>
+
+<details>
+<summary><b>Deno</b> — try Deno instantly</summary>
+
+```bash
+# Run a remote script
+runx --with deno@2 -- deno run https://examples.deno.land/hello-world.ts
+
+# Run a local TypeScript file
+runx --with deno@2 -- deno run --allow-net server.ts
+
+# Use Deno's built-in formatter
+runx --with deno -- deno fmt
+```
+
+</details>
+
+<details>
+<summary><b>Bun</b> — blazing-fast JavaScript runtime</summary>
+
+```bash
+# Run a script with Bun
+runx --with bun@1 -- bun run index.ts
+
+# Install dependencies and run
+runx --with bun@1 -- bun install && bun run dev
+
+# Use bunx (like npx)
+runx --with bun@1 -- bunx cowsay "hello from bun"
+```
+
+</details>
+
+<details>
+<summary><b>Ruby</b> — prebuilt Ruby, no compilation</summary>
+
+```bash
+# Run a Ruby script
+runx --with ruby@3 -- ruby -e "puts 'Ruby ' + RUBY_VERSION"
+
+# Run a Rake task
+runx --with ruby@3 -- gem install rake && rake build
+
+# Test with a specific Ruby version
+runx --with ruby@3.3 -- ruby test/run_tests.rb
+```
+
+</details>
+
+<details>
+<summary><b>Java</b> — any JDK version via Adoptium</summary>
+
+```bash
+# Check Java version
+runx --with java@21 -- java -version
+
+# Compile and run
+runx --with java@21 -- javac Main.java
+runx --with java@21 -- java Main
+
+# Use with Maven or Gradle (JAVA_HOME is set automatically)
+runx --with java@17 -- ./mvnw clean package
+runx --with java@21 -- ./gradlew build
+```
+
+</details>
+
+<details>
+<summary><b>Rust</b> — standalone toolchain, no rustup needed</summary>
+
+```bash
+# Check Rust version
+runx --with rust@1 -- rustc --version
+
+# Build a project
+runx --with rust@1 -- cargo build --release
+
+# Create and run a new project
+runx --with rust@1 -- cargo init hello && cd hello && cargo run
+```
+
+</details>
+
+<details>
+<summary><b>Multiple runtimes</b> — download in parallel</summary>
+
+```bash
+# Use Node and Python together
+runx --with node@22 --with python@3.12 -- node orchestrate.js
+
+# Full-stack build: Java backend + Node frontend
+runx --with java@21 --with node@22 -- ./build-all.sh
+```
+
+</details>
 
 | Problem | Before runx | With runx |
 |---------|-------------|-----------|
