@@ -246,7 +246,7 @@ mod tests {
 
         let err = ExecutorError::Wait {
             program: "node".to_string(),
-            source: std::io::Error::new(std::io::ErrorKind::Other, "interrupted"),
+            source: std::io::Error::other("interrupted"),
         };
         assert_eq!(err.to_string(), "failed to wait for `node`: interrupted");
 
