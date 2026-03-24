@@ -93,20 +93,6 @@ pub fn resolve_from_candidates(
 
 // --- Types ---
 
-/// Metadata about a resolved tool version ready for download.
-#[derive(Debug, Clone)]
-#[allow(unused)]
-pub struct ResolvedTool {
-    /// The tool name (e.g., "node").
-    pub name: String,
-    /// The exact resolved version.
-    pub version: semver::Version,
-    /// Download URL for the binary archive.
-    pub download_url: String,
-    /// Expected archive format.
-    pub archive_format: ArchiveFormat,
-}
-
 /// Supported archive formats for tool downloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveFormat {

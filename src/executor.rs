@@ -71,8 +71,13 @@ pub fn execute(
 /// On Windows: prevents the parent from exiting before the child
 /// (Ctrl+C is forwarded to the child process group by the OS).
 fn install_signal_handler() -> Result<(), ExecutorError> {
-    if SIGNAL_HANDLER_INSTALLED.load(Ordering::Acquire) {
-        return Ok(());
+    // Atomically check-and-set to prevent race between concurrent tests/calls.
+    // compare_exchange ensures only one thread ever calls ctrlc::set_handler.
+    if SIGNAL_HANDLER_INSTALLED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Ok(()); // Already installed by another thread
     }
 
     ctrlc::set_handler(|| {
@@ -90,11 +95,13 @@ fn install_signal_handler() -> Result<(), ExecutorError> {
             }
         }
     })
-    .map_err(|e| ExecutorError::SignalHandler {
-        reason: e.to_string(),
+    .map_err(|e| {
+        // Reset flag so a retry is possible
+        SIGNAL_HANDLER_INSTALLED.store(false, Ordering::Release);
+        ExecutorError::SignalHandler {
+            reason: e.to_string(),
+        }
     })?;
-
-    SIGNAL_HANDLER_INSTALLED.store(true, Ordering::Release);
     Ok(())
 }
 

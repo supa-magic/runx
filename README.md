@@ -7,7 +7,7 @@ No daemon, no persistent containers, no impact on your existing tool installatio
 ## Features
 
 - Run any command with pinned tool versions in a single invocation
-- Automatic download and caching of tool binaries
+- Automatic download and caching of tool binaries (parallel downloads when multiple tools requested)
 - Full environment isolation -- your system tools are never affected
 - Cross-platform: macOS (arm64, x86_64), Linux (x86_64, arm64), Windows (x86_64)
 - Sub-second startup for cached tools
