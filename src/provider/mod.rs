@@ -1,8 +1,25 @@
+pub mod node;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::platform::Target;
 use crate::version::VersionSpec;
+
+pub use node::NodeProvider;
+
+/// Look up a provider by tool name.
+///
+/// Returns the appropriate `Provider` implementation for the given tool,
+/// or an error if the tool is not supported.
+pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
+    match name {
+        "node" | "nodejs" => Ok(Box::new(NodeProvider)),
+        other => Err(ProviderError::UnknownTool {
+            name: other.to_string(),
+        }),
+    }
+}
 
 /// Metadata about a resolved tool version ready for download.
 #[derive(Debug, Clone)]
@@ -69,11 +86,16 @@ pub trait Provider {
 /// Errors that occur during provider operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
+    /// The requested tool is not supported.
+    #[error("unknown tool `{name}`. Supported tools: node")]
+    UnknownTool { name: String },
+
     /// No version matched the given spec.
     #[error("no {tool} version found matching `{spec}`")]
     VersionNotFound { tool: String, spec: String },
 
     /// The tool does not support this platform/architecture combination.
+    #[allow(unused)]
     #[error("{tool} does not support target `{target}`")]
     UnsupportedTarget { tool: String, target: String },
 

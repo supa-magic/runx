@@ -1,19 +1,12 @@
-#[allow(unused)]
 mod cache;
 mod cli;
-#[allow(unused)]
 mod download;
-#[allow(unused)]
 mod environment;
 mod error;
-#[allow(unused)]
 mod executor;
-#[allow(unused)]
 mod platform;
-#[allow(unused)]
 mod provider;
 mod run;
-#[allow(unused)]
 mod version;
 
 use clap::Parser;
@@ -22,7 +15,7 @@ use cli::Cli;
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    if let Err(e) = run::run(cli) {
+    if let Err(e) = run::run(cli).await {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
