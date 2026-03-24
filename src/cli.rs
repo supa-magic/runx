@@ -193,6 +193,16 @@ pub enum Command {
         tool: ToolSpec,
     },
 
+    /// Generate or update .runxrc.lock for reproducible builds
+    #[command(
+        after_help = "Examples:\n  runx lock                          Resolve and lock tool versions\n  runx lock --update                 Re-resolve and update the lockfile"
+    )]
+    Lock {
+        /// Re-resolve and update an existing lockfile
+        #[arg(long)]
+        update: bool,
+    },
+
     /// Update cached tools to the latest patch version
     #[command(
         after_help = "Examples:\n  runx update                        Update all cached tools\n  runx update node                   Update only Node.js"

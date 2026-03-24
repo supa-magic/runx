@@ -36,6 +36,9 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
         Some(Command::Uninstall { tool }) => {
             crate::install::uninstall(&tool)?;
         }
+        Some(Command::Lock { update }) => {
+            crate::lockfile::run(update)?;
+        }
         Some(Command::Update { tool }) => {
             crate::update::run(tool, cli.dry_run).await?;
         }
@@ -54,7 +57,27 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
             // CLI --with flags override config tools entirely; if no CLI tools, use config
             let mut merged = cli;
             if merged.tools.is_empty() {
-                merged.tools = cfg.tools;
+                // Check for lockfile — use locked versions if available
+                if let Some(lockpath) = crate::lockfile::find_lockfile(&cwd) {
+                    let lockfile = crate::lockfile::load_lockfile(&lockpath)?;
+                    if !lockfile.tools.is_empty() {
+                        if merged.dry_run || merged.verbose {
+                            eprintln!("Using lockfile: {}", lockpath.display());
+                        }
+                        merged.tools = lockfile
+                            .tools
+                            .iter()
+                            .map(|(name, locked)| crate::cli::ToolSpec {
+                                name: name.clone(),
+                                version: Some(locked.version.clone()),
+                            })
+                            .collect();
+                    }
+                }
+                // Fall back to .runxrc if no lockfile
+                if merged.tools.is_empty() {
+                    merged.tools = cfg.tools;
+                }
             }
 
             // Config inherit_env is a default; CLI --inherit-env flag overrides.

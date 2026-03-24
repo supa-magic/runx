@@ -9,6 +9,7 @@ mod executor;
 mod init;
 mod install;
 mod list;
+mod lockfile;
 mod platform;
 mod provider;
 mod run;
