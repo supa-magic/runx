@@ -420,32 +420,157 @@ When `.runxrc.lock` exists, runx skips version resolution entirely — same bina
 
 ## Self-Contained Scripts
 
-The killer feature: scripts that **bring their own runtime**.
+The killer feature: scripts that **bring their own runtime**. Add a shebang line and the script downloads its runtime on first run.
+
+<details>
+<summary><b>deploy.js</b> — Node.js deployment script</summary>
 
 ```js
 #!/usr/bin/env -S runx --with node@22 --
-// This script runs with Node 22 — anywhere runx is installed.
-// No package.json. No Dockerfile. Just chmod +x and go.
+// deploy.js — deploys to production with zero setup
 
-const http = require("http");
-http.createServer((_, res) => res.end("Hello!")).listen(3000);
-console.log("Server running on :3000");
+const { execSync } = require("child_process");
+const branch = execSync("git branch --show-current").toString().trim();
+
+if (branch !== "main") {
+  console.error(`Refusing to deploy from branch '${branch}'`);
+  process.exit(1);
+}
+
+console.log("Building...");
+execSync("npm run build", { stdio: "inherit" });
+console.log("Deploying...");
+execSync("npm run deploy", { stdio: "inherit" });
+console.log("Done!");
 ```
+
+</details>
+
+<details>
+<summary><b>analyze.py</b> — Python data analysis script</summary>
 
 ```python
 #!/usr/bin/env -S runx --with python@3.12 --
-# This script runs with Python 3.12 — no virtualenv needed.
-import sys
-print(f"Python {sys.version}")
+# analyze.py — quick CSV analysis, no virtualenv needed
+
+import csv, sys, statistics
+
+if len(sys.argv) < 2:
+    print("Usage: ./analyze.py data.csv")
+    sys.exit(1)
+
+with open(sys.argv[1]) as f:
+    reader = csv.DictReader(f)
+    rows = list(reader)
+
+print(f"Rows: {len(rows)}")
+for col in rows[0]:
+    try:
+        vals = [float(r[col]) for r in rows]
+        print(f"{col}: mean={statistics.mean(vals):.2f}, median={statistics.median(vals):.2f}")
+    except ValueError:
+        print(f"{col}: {len(set(r[col] for r in rows))} unique values")
 ```
+
+</details>
+
+<details>
+<summary><b>health.rb</b> — Ruby health check script</summary>
+
+```ruby
+#!/usr/bin/env -S runx --with ruby@3 --
+# health.rb — check if services are responding
+
+require "net/http"
+require "uri"
+
+services = {
+  "API"      => "https://api.example.com/health",
+  "Frontend" => "https://app.example.com",
+  "Docs"     => "https://docs.example.com",
+}
+
+services.each do |name, url|
+  begin
+    res = Net::HTTP.get_response(URI(url))
+    status = res.code.to_i < 400 ? "OK" : "FAIL"
+    puts "#{name}: #{status} (#{res.code})"
+  rescue => e
+    puts "#{name}: DOWN (#{e.message})"
+  end
+end
+```
+
+</details>
+
+<details>
+<summary><b>migrate.go</b> — Go database migration script</summary>
+
+```go
+#!/usr/bin/env -S runx --with go@1 --
+// migrate.go — run database migrations
+
+package main
+
+import (
+    "fmt"
+    "os"
+    "os/exec"
+)
+
+func main() {
+    dbURL := os.Getenv("DATABASE_URL")
+    if dbURL == "" {
+        fmt.Fprintln(os.Stderr, "DATABASE_URL not set")
+        os.Exit(1)
+    }
+
+    cmd := exec.Command("go", "run", "github.com/pressly/goose/v3/cmd/goose@latest",
+        "-dir", "./migrations", "postgres", dbURL, "up")
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+
+    if err := cmd.Run(); err != nil {
+        fmt.Fprintf(os.Stderr, "Migration failed: %v\n", err)
+        os.Exit(1)
+    }
+    fmt.Println("Migrations complete!")
+}
+```
+
+</details>
+
+<details>
+<summary><b>server.ts</b> — Deno HTTP server</summary>
+
+```ts
+#!/usr/bin/env -S runx --with deno --
+// server.ts — single-file HTTP server with Deno
+
+const port = parseInt(Deno.args[0] ?? "3000");
+
+Deno.serve({ port }, (req: Request) => {
+  const url = new URL(req.url);
+  console.log(`${req.method} ${url.pathname}`);
+  return new Response(`Hello from Deno on port ${port}!\n`);
+});
+```
+
+</details>
 
 ```bash
-chmod +x server.js
-./server.js                  # Downloads Node 22 if needed, starts the server
-./server.js --port 8080      # Arguments pass through
+# Make any script executable and run it — runtime downloads automatically
+chmod +x deploy.js analyze.py health.rb migrate.go server.ts
+
+./deploy.js                    # Downloads Node 22 on first run, then deploys
+./analyze.py sales.csv         # Downloads Python 3.12, analyzes the CSV
+./health.rb                    # Downloads Ruby 3, checks all services
+./migrate.go                   # Downloads Go, runs migrations
+./server.ts                    # Downloads Deno, starts the server
+./server.ts 8080               # Arguments pass through
 ```
 
-Share scripts with your team, drop them in CI, hand them to clients — they just work.
+Share scripts with your team, drop them in CI, hand them to clients — they just work. No Dockerfile, no setup instructions, no "install X first".
 
 ---
 
