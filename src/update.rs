@@ -115,7 +115,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_update_dry_run_no_tool_filter() {
         // dry_run=true, tool=None — should complete without error
         let result = run(None, true).await;

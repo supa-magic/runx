@@ -127,13 +127,14 @@ impl JavaProvider {
         }
     }
 
-    /// Return the JDK root directory relative to install_dir for a given version and platform.
-    fn jdk_home(version: &semver::Version, platform: Platform) -> PathBuf {
+    /// Return the JDK root directory relative to install_dir.
+    ///
+    /// After post_install renames the extracted `jdk-{version}+{build}` to `jdk`,
+    /// the JDK root is simply `jdk/` (or `jdk/Contents/Home/` on macOS).
+    fn jdk_home(platform: Platform) -> PathBuf {
         match platform {
-            Platform::MacOS => PathBuf::from(format!("jdk-{version}"))
-                .join("Contents")
-                .join("Home"),
-            _ => PathBuf::from(format!("jdk-{version}")),
+            Platform::MacOS => PathBuf::from("jdk").join("Contents").join("Home"),
+            _ => PathBuf::from("jdk"),
         }
     }
 }
@@ -173,19 +174,32 @@ impl Provider for JavaProvider {
         target.platform.default_archive_format()
     }
 
-    fn bin_paths(&self, version: &semver::Version, target: &Target) -> Vec<PathBuf> {
-        vec![Self::jdk_home(version, target.platform).join("bin")]
+    fn bin_paths(&self, _version: &semver::Version, target: &Target) -> Vec<PathBuf> {
+        vec![Self::jdk_home(target.platform).join("bin")]
     }
 
     fn env_vars(&self, install_dir: &Path) -> HashMap<String, String> {
-        // JAVA_HOME is set to install_dir; the correct JDK root depends on
-        // the version and platform, which env_vars doesn't have access to.
-        // The bin_paths method handles the full path to bin/ correctly.
-        // Users needing JAVA_HOME for Maven/Gradle should use the jdk directory.
+        // JAVA_HOME must point to the JDK root (the directory containing bin/, lib/).
+        // On macOS this is jdk/Contents/Home, on Linux/Windows it's just jdk/.
+        // The post_install_command renames the extracted directory to just "jdk".
+        let platform = crate::platform::Platform::detect().unwrap_or(Platform::Linux);
+        let jdk_root = install_dir.join(Self::jdk_home(platform));
         HashMap::from([(
             "JAVA_HOME".to_string(),
-            install_dir.to_string_lossy().to_string(),
+            jdk_root.to_string_lossy().to_string(),
         )])
+    }
+
+    /// Rename the extracted `jdk-{version}+{build}` directory to just `jdk`
+    /// so that bin_paths and JAVA_HOME work regardless of the build metadata.
+    fn post_install_command(
+        &self,
+        _version: &semver::Version,
+        _target: &Target,
+        _install_dir: &std::path::Path,
+    ) -> Option<String> {
+        // Find the jdk-* directory and rename it to jdk
+        Some("for d in jdk-*; do [ -d \"$d\" ] && mv \"$d\" jdk && break; done".to_string())
     }
 
     /// Override to return all versions in a single pass instead of the
@@ -230,37 +244,49 @@ mod tests {
     #[test]
     fn test_bin_paths_macos() {
         let paths = JavaProvider.bin_paths(&v("21.0.2"), &macos_arm64());
-        assert_eq!(paths, vec![PathBuf::from("jdk-21.0.2/Contents/Home/bin")]);
+        assert_eq!(paths, vec![PathBuf::from("jdk/Contents/Home/bin")]);
     }
 
     #[test]
     fn test_bin_paths_linux() {
         let paths = JavaProvider.bin_paths(&v("21.0.2"), &linux_x64());
-        assert_eq!(paths, vec![PathBuf::from("jdk-21.0.2/bin")]);
+        assert_eq!(paths, vec![PathBuf::from("jdk/bin")]);
     }
 
     #[test]
     fn test_bin_paths_windows() {
         let paths = JavaProvider.bin_paths(&v("21.0.2"), &windows_x64());
-        assert_eq!(paths, vec![PathBuf::from("jdk-21.0.2/bin")]);
+        assert_eq!(paths, vec![PathBuf::from("jdk/bin")]);
     }
 
     #[test]
     fn test_env_vars() {
         let vars = JavaProvider.env_vars(Path::new("/cache/java/21.0.2"));
-        assert_eq!(vars.get("JAVA_HOME").unwrap(), "/cache/java/21.0.2");
+        let java_home = vars.get("JAVA_HOME").unwrap();
+        // On macOS: /cache/java/21.0.2/jdk/Contents/Home
+        // On Linux: /cache/java/21.0.2/jdk
+        assert!(java_home.starts_with("/cache/java/21.0.2/jdk"));
     }
 
     #[test]
     fn test_jdk_home_macos() {
-        let home = JavaProvider::jdk_home(&v("21.0.2"), Platform::MacOS);
-        assert_eq!(home, PathBuf::from("jdk-21.0.2/Contents/Home"));
+        let home = JavaProvider::jdk_home(Platform::MacOS);
+        assert_eq!(home, PathBuf::from("jdk/Contents/Home"));
     }
 
     #[test]
     fn test_jdk_home_linux() {
-        let home = JavaProvider::jdk_home(&v("21.0.2"), Platform::Linux);
-        assert_eq!(home, PathBuf::from("jdk-21.0.2"));
+        let home = JavaProvider::jdk_home(Platform::Linux);
+        assert_eq!(home, PathBuf::from("jdk"));
+    }
+
+    #[test]
+    fn test_post_install_renames_jdk_dir() {
+        let cmd = JavaProvider
+            .post_install_command(&v("21.0.2"), &linux_x64(), Path::new("/cache"))
+            .unwrap();
+        assert!(cmd.contains("mv"));
+        assert!(cmd.contains("jdk"));
     }
 
     #[test]
