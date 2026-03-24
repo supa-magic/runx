@@ -8,7 +8,7 @@ use crate::environment::{Environment, TempDirs};
 use crate::error::RunxError;
 use crate::executor;
 use crate::platform::Target;
-use crate::provider;
+use crate::provider::{self, ArchiveFormat, Provider};
 use crate::version::VersionSpec;
 
 /// Dispatch CLI arguments to the appropriate subcommand handler.
@@ -38,20 +38,27 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
     Ok(())
 }
 
-/// Execute the main run workflow: resolve tools, download, build env, execute.
+/// A resolved tool ready for download and environment setup.
+struct ResolvedTool {
+    name: String,
+    version: semver::Version,
+    provider: Box<dyn Provider>,
+    cached: bool,
+    download_url: Option<String>,
+    archive_format: ArchiveFormat,
+    install_dir: PathBuf,
+}
+
+/// Execute the main run workflow: resolve tools, download in parallel, build env, execute.
 async fn run_command(cli: &Cli) -> Result<(), RunxError> {
     let target = Target::detect().map_err(RunxError::UnsupportedPlatform)?;
     let cache = Cache::new()?;
 
-    let mut all_bin_dirs: Vec<PathBuf> = Vec::new();
-    let mut all_tool_env_vars: HashMap<String, String> = HashMap::new();
-    let mut temp_dirs = TempDirs::new();
-
-    // Resolve, download, and collect bin paths for each tool
+    // Phase 1: Resolve all tools sequentially (version resolution uses blocking HTTP)
+    let mut resolved_tools = Vec::new();
     for tool_spec in &cli.tools {
         let provider = provider::get_provider(&tool_spec.name)?;
 
-        // Parse version spec from the CLI tool spec
         let version_spec = match &tool_spec.version {
             Some(v) => v.parse::<VersionSpec>().map_err(|e| {
                 crate::provider::ProviderError::ResolutionFailed {
@@ -66,61 +73,122 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
             eprintln!("Resolving {}@{}...", tool_spec.name, version_spec);
         }
 
-        // Resolve version
         let version = provider.resolve_version(&version_spec, &target)?;
 
         if !cli.quiet {
             eprintln!("Resolved {} → {}", tool_spec.name, version);
         }
 
-        // Check cache
-        if !cache.is_cached(provider.name(), &version, &target) {
-            let url = provider.download_url(&version, &target)?;
-            let format = provider.archive_format(&target);
-            let install_dir = cache.install_path(provider.name(), &version, &target);
+        let cached = cache.is_cached(provider.name(), &version, &target);
+        let install_dir = cache.install_path(provider.name(), &version, &target);
 
+        let download_url = if !cached {
+            let url = provider.download_url(&version, &target)?;
             if cli.dry_run {
                 eprintln!("Would download: {url}");
                 eprintln!("Would install to: {}", install_dir.display());
-                continue;
             }
-
+            Some(url)
+        } else {
             if !cli.quiet {
-                eprintln!("Downloading {}@{}...", tool_spec.name, version);
+                eprintln!("Using cached {}@{}", tool_spec.name, version);
             }
+            None
+        };
 
-            download_and_install(&url, &install_dir, format, None, cli.quiet).await?;
+        let archive_format = provider.archive_format(&target);
 
-            if !cli.quiet {
-                eprintln!("Installed {}@{}", tool_spec.name, version);
-            }
-        } else if !cli.quiet {
-            eprintln!("Using cached {}@{}", tool_spec.name, version);
-        }
-
-        // Collect bin paths (relative to cache install dir)
-        let install_dir = cache.install_path(provider.name(), &version, &target);
-        let bin_paths = provider.bin_paths(&version, &target);
-        for bin_path in &bin_paths {
-            all_bin_dirs.push(install_dir.join(bin_path));
-        }
-
-        // Collect env vars
-        let env_vars = provider.env_vars(&install_dir);
-        all_tool_env_vars.extend(env_vars);
-
-        // Create per-invocation temp directories declared by the provider
-        for env_var in provider.temp_env_dirs() {
-            let dir = temp_dirs.create(env_var)?;
-            if !cli.quiet {
-                eprintln!("  {env_var}={}", dir.display());
-            }
-        }
+        resolved_tools.push(ResolvedTool {
+            name: tool_spec.name.clone(),
+            version,
+            provider,
+            cached,
+            download_url,
+            archive_format,
+            install_dir,
+        });
     }
 
     if cli.dry_run {
         eprintln!("Would execute: {:?}", cli.cmd);
         return Ok(());
+    }
+
+    // Phase 2: Download all uncached tools in parallel
+    let downloads: Vec<_> = resolved_tools
+        .iter()
+        .filter(|t| !t.cached)
+        .collect::<Vec<_>>();
+
+    if !downloads.is_empty() {
+        if !cli.quiet && downloads.len() > 1 {
+            eprintln!("Downloading {} tools in parallel...", downloads.len());
+        }
+
+        let mut join_set = tokio::task::JoinSet::new();
+
+        for tool in &downloads {
+            let url = tool.download_url.clone().expect("uncached tool has URL");
+            let install_dir = tool.install_dir.clone();
+            let format = tool.archive_format;
+            let quiet = cli.quiet;
+            let name = tool.name.clone();
+
+            join_set.spawn(async move {
+                if !quiet {
+                    eprintln!("Downloading {name}...");
+                }
+                let result = download_and_install(&url, &install_dir, format, None, quiet).await;
+                if !quiet && result.is_ok() {
+                    eprintln!("Installed {name}");
+                }
+                (name, result)
+            });
+        }
+
+        // Collect results — report all errors, not just the first
+        let mut errors = Vec::new();
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok((name, Err(e))) => errors.push(format!("{name}: {e}")),
+                Err(e) => errors.push(format!("task failed: {e}")),
+                Ok((_, Ok(()))) => {}
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(RunxError::Download(
+                crate::download::DownloadError::Extraction {
+                    path: PathBuf::from("parallel downloads"),
+                    reason: errors.join("; "),
+                },
+            ));
+        }
+    }
+
+    // Phase 3: Collect bin paths, env vars, and temp dirs
+    let mut all_bin_dirs: Vec<PathBuf> = Vec::new();
+    let mut all_tool_env_vars: HashMap<String, String> = HashMap::new();
+    let mut temp_dirs = TempDirs::new();
+
+    for tool in &resolved_tools {
+        // Bin paths
+        let bin_paths = tool.provider.bin_paths(&tool.version, &target);
+        for bin_path in &bin_paths {
+            all_bin_dirs.push(tool.install_dir.join(bin_path));
+        }
+
+        // Env vars
+        let env_vars = tool.provider.env_vars(&tool.install_dir);
+        all_tool_env_vars.extend(env_vars);
+
+        // Temp directories
+        for env_var in tool.provider.temp_env_dirs() {
+            let dir = temp_dirs.create(env_var)?;
+            if !cli.quiet {
+                eprintln!("  {env_var}={}", dir.display());
+            }
+        }
     }
 
     // Build isolated environment
@@ -139,7 +207,6 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
 
     let status = executor::execute(program, args, environment.vars())?;
 
-    // temp_dirs is dropped here via RAII, cleaning up temp directories
     drop(temp_dirs);
 
     let code = executor::exit_code(&status);
@@ -158,9 +225,6 @@ mod tests {
     use crate::error::RunxError;
 
     use super::run;
-
-    // Note: these tests use the sync error paths only.
-    // Full async pipeline tests require network access (nodejs.org).
 
     #[tokio::test]
     async fn test_run_no_command_returns_error() {
