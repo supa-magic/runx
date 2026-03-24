@@ -22,17 +22,17 @@ That's it. Node 22 was downloaded, cached, and your command ran in a fully isola
 
 ### Supported runtimes
 
-| Runtime | Examples | Version source |
-|---------|----------|----------------|
-| **Node.js** | `node@18` `node@20.11.0` `nodejs` | nodejs.org |
-| **Python** | `python@3.12` `python@3.12.1` `python3` | python-build-standalone |
-| **Go** | `go@1` `go@1.22.0` `golang` | go.dev |
-| **Deno** | `deno@2` `deno@2.0.0` | GitHub releases |
-| **Bun** | `bun@1` `bun@1.2.0` `bunx` | GitHub releases |
-| **Ruby** | `ruby@3` `ruby@3.3.0` `rb` | ruby-builder releases |
-| **Java** | `java@21` `java@21.0.2` `jdk` | Eclipse Adoptium API |
-| **Rust** | `rust@1` `rust@1.77.0` `rustc` `cargo` | static.rust-lang.org |
-| **Any tool** | via [plugins](#plugins) | configurable |
+| Runtime | Name | Aliases |
+|---------|------|---------|
+| **Node.js** | `node` | `nodejs` |
+| **Python** | `python` | `python3` |
+| **Go** | `go` | `golang` |
+| **Deno** | `deno` | |
+| **Bun** | `bun` | `bunx` |
+| **Ruby** | `ruby` | `rb` |
+| **Java** | `java` | `jdk` |
+| **Rust** | `rust` | `rustc`, `cargo` |
+| **Any tool** | via [plugins](#plugins) | |
 
 | Problem | Before runx | With runx |
 |---------|-------------|-----------|
