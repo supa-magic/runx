@@ -238,11 +238,11 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
         cli.inherit_env,
     );
 
-    // Execute the command
-    let program = &cli.cmd[0];
-    let args = &cli.cmd[1..];
+    // Shebang / script detection: if cmd[0] is a file path (not a binary name),
+    // infer the interpreter from the tool spec and prepend it.
+    let (program, args) = resolve_script_command(&cli.cmd, &cli.tools);
 
-    let status = executor::execute(program, args, environment.vars())?;
+    let status = executor::execute(&program, &args, environment.vars())?;
 
     drop(temp_dirs);
 
@@ -252,6 +252,51 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
     }
 
     Ok(())
+}
+
+/// Map a tool name to its default interpreter command for script execution.
+///
+/// Returns `None` if the tool doesn't have a natural script-running mode.
+fn tool_interpreter(tool_name: &str) -> Option<Vec<String>> {
+    match tool_name {
+        "node" | "nodejs" => Some(vec!["node".to_string()]),
+        "python" | "python3" => Some(vec!["python3".to_string()]),
+        "deno" => Some(vec!["deno".to_string(), "run".to_string()]),
+        "bun" | "bunx" => Some(vec!["bun".to_string(), "run".to_string()]),
+        "go" | "golang" => Some(vec!["go".to_string(), "run".to_string()]),
+        _ => None,
+    }
+}
+
+/// Detect if cmd[0] is a script file and prepend the interpreter if needed.
+///
+/// When runx is invoked via shebang (`#!/usr/bin/env -S runx --with node@22 --`),
+/// the kernel passes the script path as the first argument after `--`.
+/// This function detects that case and prepends the interpreter command.
+fn resolve_script_command(cmd: &[String], tools: &[crate::cli::ToolSpec]) -> (String, Vec<String>) {
+    debug_assert!(!cmd.is_empty(), "cmd must not be empty");
+    let first = &cmd[0];
+
+    // If cmd[0] is already a known tool binary, use it as-is
+    if provider::get_provider(first).is_ok() || !std::path::Path::new(first).is_file() {
+        return (first.clone(), cmd[1..].to_vec());
+    }
+
+    // cmd[0] is a file — try to infer the interpreter from the tool spec
+    if tools.len() == 1
+        && let Some(mut interpreter) = tool_interpreter(&tools[0].name)
+    {
+        let script_path = first.clone();
+        let mut args: Vec<String> = Vec::new();
+        let program = interpreter.remove(0);
+        args.extend(interpreter);
+        args.push(script_path);
+        args.extend_from_slice(&cmd[1..]);
+        return (program, args);
+    }
+
+    // Fallback: use as-is
+    (first.clone(), cmd[1..].to_vec())
 }
 
 /// Generate shell completions and print to stdout.
@@ -331,5 +376,137 @@ mod tests {
             .unwrap();
         let result = run(cli).await;
         assert!(result.is_err());
+    }
+
+    // --- Shebang / script detection tests ---
+
+    #[test]
+    fn test_tool_interpreter_node() {
+        let interp = super::tool_interpreter("node").unwrap();
+        assert_eq!(interp, vec!["node"]);
+    }
+
+    #[test]
+    fn test_tool_interpreter_python() {
+        let interp = super::tool_interpreter("python").unwrap();
+        assert_eq!(interp, vec!["python3"]);
+    }
+
+    #[test]
+    fn test_tool_interpreter_deno() {
+        let interp = super::tool_interpreter("deno").unwrap();
+        assert_eq!(interp, vec!["deno", "run"]);
+    }
+
+    #[test]
+    fn test_tool_interpreter_go() {
+        let interp = super::tool_interpreter("go").unwrap();
+        assert_eq!(interp, vec!["go", "run"]);
+    }
+
+    #[test]
+    fn test_tool_interpreter_bun() {
+        let interp = super::tool_interpreter("bun").unwrap();
+        assert_eq!(interp, vec!["bun", "run"]);
+    }
+
+    #[test]
+    fn test_tool_interpreter_unknown() {
+        assert!(super::tool_interpreter("ruby").is_none());
+    }
+
+    #[test]
+    fn test_resolve_script_command_binary_name() {
+        let cmd = vec!["node".to_string(), "-v".to_string()];
+        let tools = vec![];
+        let (program, args) = super::resolve_script_command(&cmd, &tools);
+        assert_eq!(program, "node");
+        assert_eq!(args, vec!["-v"]);
+    }
+
+    #[test]
+    fn test_resolve_script_command_nonexistent_file() {
+        let cmd = vec!["nonexistent_file.js".to_string()];
+        let tools = vec![crate::cli::ToolSpec {
+            name: "node".to_string(),
+            version: Some("22".to_string()),
+        }];
+        let (program, args) = super::resolve_script_command(&cmd, &tools);
+        // File doesn't exist, so treated as a binary name
+        assert_eq!(program, "nonexistent_file.js");
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_script_command_real_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("test.js");
+        std::fs::write(&script, "console.log('hello')").unwrap();
+
+        let cmd = vec![script.to_string_lossy().to_string()];
+        let tools = vec![crate::cli::ToolSpec {
+            name: "node".to_string(),
+            version: Some("22".to_string()),
+        }];
+        let (program, args) = super::resolve_script_command(&cmd, &tools);
+        assert_eq!(program, "node");
+        assert_eq!(args, vec![script.to_string_lossy().to_string()]);
+    }
+
+    #[test]
+    fn test_resolve_script_command_real_file_with_extra_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("app.ts");
+        std::fs::write(&script, "").unwrap();
+
+        let cmd = vec![
+            script.to_string_lossy().to_string(),
+            "--port".to_string(),
+            "3000".to_string(),
+        ];
+        let tools = vec![crate::cli::ToolSpec {
+            name: "deno".to_string(),
+            version: None,
+        }];
+        let (program, args) = super::resolve_script_command(&cmd, &tools);
+        assert_eq!(program, "deno");
+        assert_eq!(
+            args,
+            vec!["run", &script.to_string_lossy(), "--port", "3000"]
+        );
+    }
+
+    #[test]
+    fn test_resolve_script_command_multiple_tools_no_inference() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("test.js");
+        std::fs::write(&script, "").unwrap();
+
+        let cmd = vec![script.to_string_lossy().to_string()];
+        let tools = vec![
+            crate::cli::ToolSpec {
+                name: "node".to_string(),
+                version: None,
+            },
+            crate::cli::ToolSpec {
+                name: "python".to_string(),
+                version: None,
+            },
+        ];
+        let (program, _) = super::resolve_script_command(&cmd, &tools);
+        // Multiple tools — can't infer, use file as-is
+        assert_eq!(program, script.to_string_lossy());
+    }
+
+    #[test]
+    fn test_tool_interpreter_aliases() {
+        // Verify all aliases map correctly
+        assert_eq!(super::tool_interpreter("nodejs").unwrap(), vec!["node"]);
+        assert_eq!(super::tool_interpreter("python3").unwrap(), vec!["python3"]);
+        assert_eq!(
+            super::tool_interpreter("golang").unwrap(),
+            vec!["go", "run"]
+        );
+        assert_eq!(super::tool_interpreter("bunx").unwrap(), vec!["bun", "run"]);
     }
 }

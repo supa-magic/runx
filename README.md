@@ -159,6 +159,48 @@ eval "$(runx completions zsh)"
 runx completions fish | source
 ```
 
+## Script Runner / Shebang
+
+Scripts can use runx directly in their shebang line, so they run with the right tool version automatically — no wrapper scripts needed.
+
+### Shebang usage
+
+```bash
+#!/usr/bin/env -S runx --with node@22 --
+console.log("Hello from Node 22!");
+```
+
+```bash
+#!/usr/bin/env -S runx --with python@3.12 --
+print("Hello from Python 3.12!")
+```
+
+```bash
+#!/usr/bin/env -S runx --with deno@2 --
+console.log("Hello from Deno 2!");
+```
+
+Make the script executable and run it directly:
+
+```bash
+chmod +x script.js
+./script.js --flag arg1 arg2    # Args are passed through to the script
+```
+
+### How it works
+
+When `cmd[0]` is a file path, runx auto-detects the interpreter from the `--with` flag and runs the file with it. This works with all 5 supported tools:
+
+| `--with` | Interpreter |
+|----------|-------------|
+| `node@*` | `node` |
+| `python@*` | `python3` |
+| `go@*` | `go run` |
+| `deno@*` | `deno run` |
+| `bun@*` | `bun` |
+
+Script arguments are passed through unchanged.
+
 ## How It Works
 
 1. **Resolve** — queries upstream APIs to find the exact version (e.g., `node@18` → `18.20.8`)
