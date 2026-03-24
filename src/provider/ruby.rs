@@ -48,7 +48,7 @@ impl RubyProvider {
             releases
                 .iter()
                 .flat_map(|r| r.assets.iter())
-                .filter_map(|a| Self::extract_version(&a.name)),
+                .map(|a| Self::extract_version(&a.name)),
         );
 
         if versions.is_empty() {
@@ -62,10 +62,10 @@ impl RubyProvider {
     }
 
     /// Extract a Ruby version from an asset filename like "ruby-3.3.0-ubuntu-22.04.tar.gz".
-    fn extract_version(name: &str) -> Option<Option<semver::Version>> {
+    fn extract_version(name: &str) -> Option<semver::Version> {
         let stem = name.strip_prefix("ruby-")?;
         let ver_str = stem.split('-').next()?;
-        Some(semver::Version::parse(ver_str).ok())
+        semver::Version::parse(ver_str).ok()
     }
 
     /// Map target to ruby-builder's platform naming.
@@ -122,6 +122,12 @@ impl Provider for RubyProvider {
 
     fn temp_env_dirs(&self) -> Vec<&'static str> {
         vec!["GEM_HOME", "GEM_PATH"]
+    }
+
+    fn list_versions(&self, _target: &Target) -> Result<Vec<semver::Version>, ProviderError> {
+        let mut versions = Self::fetch_versions()?;
+        versions.sort_by(|a, b| b.cmp(a));
+        Ok(versions)
     }
 }
 
@@ -197,13 +203,37 @@ mod tests {
     fn test_extract_version() {
         assert_eq!(
             RubyProvider::extract_version("ruby-3.3.0-ubuntu-22.04.tar.gz"),
-            Some(Some(v("3.3.0")))
+            Some(v("3.3.0"))
         );
         assert!(RubyProvider::extract_version("something-else.tar.gz").is_none());
+        // Non-semver version returns None (not Some(None))
+        assert!(RubyProvider::extract_version("ruby-head-ubuntu-22.04.tar.gz").is_none());
+    }
+
+    #[test]
+    fn test_ruby_platform_macos_x64() {
+        let target = Target::new(Platform::MacOS, crate::platform::Arch::X86_64);
+        assert_eq!(
+            RubyProvider::ruby_platform(&target).unwrap(),
+            "macos-latest"
+        );
+    }
+
+    #[test]
+    fn test_ruby_platform_linux_arm64() {
+        assert_eq!(
+            RubyProvider::ruby_platform(&linux_arm64()).unwrap(),
+            "ubuntu-22.04-arm"
+        );
     }
 
     #[test]
     fn test_get_provider_ruby() {
         assert_eq!(super::super::get_provider("ruby").unwrap().name(), "ruby");
+    }
+
+    #[test]
+    fn test_get_provider_rb_alias() {
+        assert_eq!(super::super::get_provider("rb").unwrap().name(), "ruby");
     }
 }

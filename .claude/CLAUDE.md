@@ -2,7 +2,7 @@
 
 Ephemeral environment runner -- run any command with specific tool versions without global installs. Written in Rust (edition 2024).
 
-**Status:** All phases complete. Core CLI, 5 providers (Node.js, Python, Go, Deno, Bun), .runxrc config, lockfile, cache management, global install, auto-update, plugin system, shell completions, shebang runner, actionable error messages.
+**Status:** All phases complete. Core CLI, 8 providers (Node.js, Python, Go, Deno, Bun, Ruby, Java, Rust), .runxrc config, lockfile, cache management, global install, auto-update, plugin system, shell completions, shebang runner, actionable error messages.
 
 ## Build & Test Commands
 
@@ -106,7 +106,7 @@ runx completions bash|zsh|fish
 
 | Usage | Description |
 |-------|-------------|
-| `runx list` | Show all 5 supported tool providers with aliases and cache status |
+| `runx list` | Show all 8 supported tool providers with aliases and cache status |
 | `runx list --cached` | Show cached tool versions with disk sizes |
 | `runx list <tool>` | Query upstream and show available versions for a specific tool |
 

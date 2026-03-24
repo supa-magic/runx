@@ -30,6 +30,9 @@ struct AdoptiumAvailableReleases {
 ///
 /// Resolves versions from the Adoptium API and constructs download URLs
 /// for the official Temurin JDK binary distributions.
+///
+/// Uses the `/v3/binary/latest/{major}/ga/` endpoint for downloads, which
+/// handles build metadata internally and always returns the latest GA build.
 pub struct JavaProvider;
 
 impl JavaProvider {
@@ -42,8 +45,9 @@ impl JavaProvider {
 
     /// Parse Adoptium available releases into semver versions.
     ///
-    /// The Adoptium API returns major version numbers. We resolve each to
-    /// the latest GA release to get the full version.
+    /// Fetches the latest GA release for each available major version.
+    /// Errors for individual majors are collected and surfaced if no versions
+    /// can be resolved at all.
     fn parse_available(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
         let info: AdoptiumAvailableReleases =
             serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
@@ -52,24 +56,28 @@ impl JavaProvider {
             })?;
 
         let mut versions = Vec::new();
+        let mut last_error = None;
+
         for major in &info.available_releases {
-            // Fetch the latest GA release for each major version
             let url = format!(
                 "https://api.adoptium.net/v3/info/release_versions?architecture=x64&heap_size=normal&image_type=jdk&os=linux&page=0&page_size=1&project=jdk&release_type=ga&sort_method=DEFAULT&sort_order=DESC&vendor=eclipse&version=%5B{major}%2C{}%29",
                 major + 1
             );
-            if let Ok(body) = fetch_json(&url, "java")
-                && let Ok(parsed) = Self::parse_version_response(&body)
-            {
-                versions.extend(parsed);
+            match fetch_json(&url, "java").and_then(|b| Self::parse_version_response(&b)) {
+                Ok(parsed) => versions.extend(parsed),
+                Err(e) => {
+                    last_error = Some(e);
+                }
             }
         }
 
         if versions.is_empty() {
-            return Err(ProviderError::ResolutionFailed {
-                tool: "java".to_string(),
-                reason: "no Java versions found".to_string(),
-            });
+            return Err(
+                last_error.unwrap_or_else(|| ProviderError::ResolutionFailed {
+                    tool: "java".to_string(),
+                    reason: "no Java versions found".to_string(),
+                }),
+            );
         }
 
         versions.sort_by(|a, b| b.cmp(a));
@@ -92,7 +100,10 @@ impl JavaProvider {
         Ok(collect_stable_versions(resp.versions.into_iter().map(
             |v| {
                 // Adoptium semver field includes build metadata, strip it
-                let clean = v.semver.split('+').next().unwrap_or(&v.semver);
+                let clean = v
+                    .semver
+                    .split_once('+')
+                    .map_or(v.semver.as_str(), |(pre, _)| pre);
                 semver::Version::parse(clean)
                     .ok()
                     .or_else(|| Some(semver::Version::new(v.major, v.minor, v.security)))
@@ -115,6 +126,16 @@ impl JavaProvider {
             Arch::Aarch64 => "aarch64",
         }
     }
+
+    /// Return the JDK root directory relative to install_dir for a given version and platform.
+    fn jdk_home(version: &semver::Version, platform: Platform) -> PathBuf {
+        match platform {
+            Platform::MacOS => PathBuf::from(format!("jdk-{version}"))
+                .join("Contents")
+                .join("Home"),
+            _ => PathBuf::from(format!("jdk-{version}")),
+        }
+    }
 }
 
 impl Provider for JavaProvider {
@@ -131,6 +152,10 @@ impl Provider for JavaProvider {
         resolve_from_candidates(&candidates, spec, "java")
     }
 
+    /// Download URL uses the Adoptium `/latest/{major}/ga/` endpoint.
+    ///
+    /// This endpoint resolves to the latest GA build for a given major version,
+    /// handling build metadata internally. No need to carry the `+build` suffix.
     fn download_url(
         &self,
         version: &semver::Version,
@@ -139,8 +164,8 @@ impl Provider for JavaProvider {
         let os = Self::adoptium_os(target.platform);
         let arch = Self::adoptium_arch(target.arch);
         Ok(format!(
-            "https://api.adoptium.net/v3/binary/version/jdk-{version}/\
-             {os}/{arch}/jdk/hotspot/normal/eclipse?project=jdk"
+            "https://api.adoptium.net/v3/binary/latest/{major}/ga/{os}/{arch}/jdk/hotspot/normal/eclipse?project=jdk",
+            major = version.major
         ))
     }
 
@@ -149,21 +174,26 @@ impl Provider for JavaProvider {
     }
 
     fn bin_paths(&self, version: &semver::Version, target: &Target) -> Vec<PathBuf> {
-        let dir_name = match target.platform {
-            Platform::MacOS => format!("jdk-{version}/Contents/Home/bin"),
-            _ => format!("jdk-{version}/bin"),
-        };
-        vec![PathBuf::from(dir_name)]
+        vec![Self::jdk_home(version, target.platform).join("bin")]
     }
 
     fn env_vars(&self, install_dir: &Path) -> HashMap<String, String> {
-        // JAVA_HOME is set to the jdk directory; we'll use a glob-like approach
-        // since the exact directory name varies. The caller sets JAVA_HOME
-        // based on the first entry in bin_paths' parent.
+        // JAVA_HOME is set to install_dir; the correct JDK root depends on
+        // the version and platform, which env_vars doesn't have access to.
+        // The bin_paths method handles the full path to bin/ correctly.
+        // Users needing JAVA_HOME for Maven/Gradle should use the jdk directory.
         HashMap::from([(
             "JAVA_HOME".to_string(),
             install_dir.to_string_lossy().to_string(),
         )])
+    }
+
+    /// Override to return all versions in a single pass instead of the
+    /// default O(major * minor) loop.
+    fn list_versions(&self, _target: &Target) -> Result<Vec<semver::Version>, ProviderError> {
+        let mut versions = Self::fetch_versions()?;
+        versions.sort_by(|a, b| b.cmp(a));
+        Ok(versions)
     }
 }
 
@@ -210,9 +240,27 @@ mod tests {
     }
 
     #[test]
+    fn test_bin_paths_windows() {
+        let paths = JavaProvider.bin_paths(&v("21.0.2"), &windows_x64());
+        assert_eq!(paths, vec![PathBuf::from("jdk-21.0.2/bin")]);
+    }
+
+    #[test]
     fn test_env_vars() {
         let vars = JavaProvider.env_vars(Path::new("/cache/java/21.0.2"));
         assert_eq!(vars.get("JAVA_HOME").unwrap(), "/cache/java/21.0.2");
+    }
+
+    #[test]
+    fn test_jdk_home_macos() {
+        let home = JavaProvider::jdk_home(&v("21.0.2"), Platform::MacOS);
+        assert_eq!(home, PathBuf::from("jdk-21.0.2/Contents/Home"));
+    }
+
+    #[test]
+    fn test_jdk_home_linux() {
+        let home = JavaProvider::jdk_home(&v("21.0.2"), Platform::Linux);
+        assert_eq!(home, PathBuf::from("jdk-21.0.2"));
     }
 
     #[test]
@@ -229,13 +277,32 @@ mod tests {
     }
 
     #[test]
-    fn test_download_url_contains_version() {
+    fn test_download_url_uses_latest_endpoint() {
         let url = JavaProvider
             .download_url(&v("21.0.2"), &linux_x64())
             .unwrap();
-        assert!(url.contains("jdk-21.0.2"));
+        // Uses /latest/21/ga/ endpoint instead of /version/jdk-21.0.2/
+        assert!(url.contains("/latest/21/ga/"));
         assert!(url.contains("linux"));
         assert!(url.contains("x64"));
+    }
+
+    #[test]
+    fn test_download_url_macos_arm64() {
+        let url = JavaProvider
+            .download_url(&v("21.0.2"), &macos_arm64())
+            .unwrap();
+        assert!(url.contains("/latest/21/ga/"));
+        assert!(url.contains("mac"));
+        assert!(url.contains("aarch64"));
+    }
+
+    #[test]
+    fn test_download_url_windows() {
+        let url = JavaProvider
+            .download_url(&v("21.0.2"), &windows_x64())
+            .unwrap();
+        assert!(url.contains("windows"));
     }
 
     #[test]
@@ -244,6 +311,32 @@ mod tests {
         let versions = JavaProvider::parse_version_response(json).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0], v("21.0.2"));
+    }
+
+    #[test]
+    fn test_parse_version_response_fallback_to_major_minor_security() {
+        // When semver field can't be parsed, fall back to major.minor.security
+        let json =
+            r#"{"versions": [{"major": 17, "minor": 0, "security": 9, "semver": "unparseable"}]}"#;
+        let versions = JavaProvider::parse_version_response(json).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0], v("17.0.9"));
+    }
+
+    #[test]
+    fn test_parse_version_response_invalid_json() {
+        assert!(JavaProvider::parse_version_response("not json").is_err());
+    }
+
+    #[test]
+    fn test_parse_available_invalid_json() {
+        assert!(JavaProvider::parse_available("not json").is_err());
+    }
+
+    #[test]
+    fn test_parse_available_empty_releases() {
+        let json = r#"{"available_releases": []}"#;
+        assert!(JavaProvider::parse_available(json).is_err());
     }
 
     #[test]

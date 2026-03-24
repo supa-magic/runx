@@ -256,7 +256,7 @@ export PATH="$HOME/.runx/bin:$PATH"
 
 ## Plugins
 
-Add **any tool** — not just the 5 built-in runtimes — with a simple TOML file:
+Add **any tool** — not just the 8 built-in runtimes — with a simple TOML file:
 
 ```toml
 # ~/.runx/plugins/zig.toml

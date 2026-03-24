@@ -55,6 +55,12 @@ impl Provider for RustProvider {
         version: &semver::Version,
         target: &Target,
     ) -> Result<String, ProviderError> {
+        if target.platform == crate::platform::Platform::Windows {
+            return Err(ProviderError::UnsupportedTarget {
+                tool: "rust".to_string(),
+                target: target.to_string(),
+            });
+        }
         let triple = target.triple();
         Ok(format!(
             "https://static.rust-lang.org/dist/rust-{version}-{triple}.tar.gz"
@@ -69,15 +75,21 @@ impl Provider for RustProvider {
         vec![PathBuf::from("bin")]
     }
 
-    fn env_vars(&self, install_dir: &Path) -> HashMap<String, String> {
-        HashMap::from([(
-            "RUSTUP_HOME".to_string(),
-            install_dir.to_string_lossy().to_string(),
-        )])
+    fn env_vars(&self, _install_dir: &Path) -> HashMap<String, String> {
+        // No special env vars needed — cargo/rustc only need PATH,
+        // which is handled via bin_paths(). Setting RUSTUP_HOME would
+        // collide with the user's existing rustup installation.
+        HashMap::new()
     }
 
     fn temp_env_dirs(&self) -> Vec<&'static str> {
         vec!["CARGO_HOME"]
+    }
+
+    fn list_versions(&self, _target: &Target) -> Result<Vec<semver::Version>, ProviderError> {
+        let mut versions = Self::fetch_versions()?;
+        versions.sort_by(|a, b| b.cmp(a));
+        Ok(versions)
     }
 
     fn post_install_command(
@@ -89,7 +101,7 @@ impl Provider for RustProvider {
         let triple = target.triple();
         let prefix = install_dir.display();
         Some(format!(
-            "rust-{version}-{triple}/install.sh --prefix={prefix} --without=rust-docs --disable-ldconfig"
+            "rust-{version}-{triple}/install.sh '--prefix={prefix}' --without=rust-docs --disable-ldconfig"
         ))
     }
 }
@@ -123,9 +135,9 @@ mod tests {
     }
 
     #[test]
-    fn test_env_vars() {
+    fn test_env_vars_empty() {
         let vars = RustProvider.env_vars(Path::new("/cache/rust/1.77.0"));
-        assert_eq!(vars.get("RUSTUP_HOME").unwrap(), "/cache/rust/1.77.0");
+        assert!(vars.is_empty());
     }
 
     #[test]
@@ -161,8 +173,22 @@ mod tests {
             .post_install_command(&v("1.77.0"), &linux_x64(), Path::new("/cache/rust/1.77.0"))
             .unwrap();
         assert!(cmd.contains("install.sh"));
-        assert!(cmd.contains("--prefix=/cache/rust/1.77.0"));
+        assert!(cmd.contains("'--prefix=/cache/rust/1.77.0'")); // quoted for shell safety
         assert!(cmd.contains("rust-1.77.0-x86_64-unknown-linux-gnu"));
+    }
+
+    #[test]
+    fn test_download_url_windows_unsupported() {
+        assert!(
+            RustProvider
+                .download_url(&v("1.77.0"), &windows_x64())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_get_provider_cargo_alias() {
+        assert_eq!(super::super::get_provider("cargo").unwrap().name(), "rust");
     }
 
     #[test]

@@ -123,11 +123,12 @@ static RESPONSE_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Stri
 
 pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
     tokio::task::block_in_place(|| {
-        // Check cache first
-        if let Ok(cache) = RESPONSE_CACHE.lock()
-            && let Some(body) = cache.get(url)
+        // Check cache first (recover from poison — cached data is still valid)
         {
-            return Ok(body.clone());
+            let cache = RESPONSE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(body) = cache.get(url) {
+                return Ok(body.clone());
+            }
         }
 
         let response = HTTP_CLIENT
@@ -155,10 +156,11 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
                 reason: format!("{e:#}"),
             })?;
 
-        // Cache the response
-        if let Ok(mut cache) = RESPONSE_CACHE.lock() {
-            cache.insert(url.to_string(), body.clone());
-        }
+        // Cache the response (recover from poison)
+        RESPONSE_CACHE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(url.to_string(), body.clone());
 
         Ok(body)
     })
