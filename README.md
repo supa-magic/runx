@@ -20,20 +20,6 @@ That's it. Node 22 was downloaded, cached, and your command ran in a fully isola
 
 **runx** is a single binary that replaces nvm, pyenv, goenv, and a dozen YAML lines in your CI — for **Node.js, Python, Go, Deno, Bun, Ruby, Java, and Rust** (and [any tool via plugins](#plugins)).
 
-### Supported runtimes
-
-| Runtime | Name | Aliases |
-|---------|------|---------|
-| **Node.js** | `node` | `nodejs` |
-| **Python** | `python` | `python3` |
-| **Go** | `go` | `golang` |
-| **Deno** | `deno` | |
-| **Bun** | `bun` | `bunx` |
-| **Ruby** | `ruby` | `rb` |
-| **Java** | `java` | `jdk` |
-| **Rust** | `rust` | `rustc`, `cargo` |
-| **Any tool** | via [plugins](#plugins) | |
-
 | Problem | Before runx | With runx |
 |---------|-------------|-----------|
 | "Works on my machine" | Everyone has different versions | `.runxrc` pins versions for the whole team |
