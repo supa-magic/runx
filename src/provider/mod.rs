@@ -85,7 +85,13 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
 /// the tokio runtime. All providers use this to avoid duplicating HTTP logic.
 pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
     tokio::task::block_in_place(|| {
-        reqwest::blocking::Client::new()
+        reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .build()
+            .map_err(|e| ProviderError::ResolutionFailed {
+                tool: tool.to_string(),
+                reason: format!("{e:#}"),
+            })?
             .get(url)
             .header("User-Agent", "runx")
             .header("Accept", "application/json")

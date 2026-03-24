@@ -40,7 +40,7 @@ pub struct PythonProvider;
 
 impl PythonProvider {
     const RELEASES_URL: &str =
-        "https://api.github.com/repos/indygreg/python-build-standalone/releases?per_page=30";
+        "https://api.github.com/repos/astral-sh/python-build-standalone/releases?per_page=30";
 
     /// Get releases, fetching from GitHub only on the first call.
     /// Caches the result in a static Mutex to avoid duplicate HTTP requests
