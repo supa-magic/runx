@@ -1,3 +1,4 @@
+pub mod bun;
 pub mod deno;
 pub mod go;
 pub mod node;
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 use crate::platform::Target;
 use crate::version::VersionSpec;
 
+pub use bun::BunProvider;
 pub use deno::DenoProvider;
 pub use go::GoProvider;
 pub use node::NodeProvider;
@@ -24,6 +26,7 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
         "python" | "python3" => Ok(Box::new(PythonProvider)),
         "go" | "golang" => Ok(Box::new(GoProvider)),
         "deno" => Ok(Box::new(DenoProvider)),
+        "bun" | "bunx" => Ok(Box::new(BunProvider)),
         other => Err(ProviderError::UnknownTool {
             name: other.to_string(),
         }),
@@ -165,7 +168,7 @@ pub trait Provider {
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     /// The requested tool is not supported.
-    #[error("unknown tool `{name}`. Supported tools: node, python, go, deno")]
+    #[error("unknown tool `{name}`. Supported tools: node, python, go, deno, bun")]
     UnknownTool { name: String },
 
     /// No version matched the given spec.
