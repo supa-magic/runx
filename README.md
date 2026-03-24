@@ -188,6 +188,24 @@ runx --with java@21 --with node@22 -- ./build-all.sh
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh
+```
+
+Auto-detects your OS and architecture. Installs to `/usr/local/bin` (or `~/.runx/bin` if no sudo).
+
+<details>
+<summary>Install a specific version</summary>
+
+```bash
+RUNX_VERSION=v0.3.0 curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh
+```
+
+</details>
+
+<details>
+<summary>Manual install</summary>
+
+```bash
 # macOS (Apple Silicon)
 curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-aarch64-apple-darwin.tar.gz | tar xz
 sudo mv runx /usr/local/bin/
@@ -207,6 +225,8 @@ sudo mv runx /usr/local/bin/
 # Windows — download .zip from Releases
 # https://github.com/supa-magic/runx/releases/latest
 ```
+
+</details>
 
 <details>
 <summary>Build from source</summary>
