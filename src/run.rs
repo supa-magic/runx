@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_tool_interpreter_unknown() {
-        assert!(super::tool_interpreter("ruby").is_none());
+        assert!(super::tool_interpreter("zig").is_none());
     }
 
     #[test]

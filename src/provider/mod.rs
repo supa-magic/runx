@@ -1,8 +1,11 @@
 pub mod bun;
 pub mod deno;
 pub mod go;
+pub mod java;
 pub mod node;
 pub mod python;
+pub mod ruby;
+pub mod rust;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,8 +16,11 @@ use crate::version::VersionSpec;
 pub use bun::BunProvider;
 pub use deno::DenoProvider;
 pub use go::GoProvider;
+pub use java::JavaProvider;
 pub use node::NodeProvider;
 pub use python::PythonProvider;
+pub use ruby::RubyProvider;
+pub use rust::RustProvider;
 
 /// Canonical registry of all supported tools with their aliases and interpreter commands.
 ///
@@ -45,6 +51,21 @@ pub const TOOL_REGISTRY: &[ToolEntry] = &[
         aliases: &["bunx"],
         interpreter: &["bun", "run"],
     },
+    ToolEntry {
+        name: "ruby",
+        aliases: &["rb"],
+        interpreter: &["ruby"],
+    },
+    ToolEntry {
+        name: "java",
+        aliases: &["jdk"],
+        interpreter: &["java"],
+    },
+    ToolEntry {
+        name: "rust",
+        aliases: &["rustc", "cargo"],
+        interpreter: &[],
+    },
 ];
 
 /// A registered tool with its aliases and default interpreter command.
@@ -65,6 +86,9 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
         "go" | "golang" => Ok(Box::new(GoProvider)),
         "deno" => Ok(Box::new(DenoProvider)),
         "bun" | "bunx" => Ok(Box::new(BunProvider)),
+        "ruby" | "rb" => Ok(Box::new(RubyProvider)),
+        "java" | "jdk" => Ok(Box::new(JavaProvider)),
+        "rust" | "rustc" | "cargo" => Ok(Box::new(RustProvider)),
         other => {
             // Check for plugins before returning UnknownTool
             if let Ok(Some(provider)) = crate::plugin::get_plugin_provider(other) {
@@ -81,9 +105,11 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
 
 /// Fetch JSON from a URL using blocking HTTP inside an async context.
 ///
-/// Uses `tokio::task::block_in_place` to bridge blocking `reqwest` into
-/// the tokio runtime. All providers use this to avoid duplicating HTTP logic.
-/// Shared HTTP client, constructed once and reused across all fetch calls.
+/// Shared HTTP client and per-invocation response cache.
+///
+/// The client is built once via `LazyLock`. The response cache deduplicates
+/// HTTP calls within a single process lifetime — if `fetch_json` is called
+/// twice with the same URL, the second call returns the cached body.
 static HTTP_CLIENT: std::sync::LazyLock<reqwest::blocking::Client> =
     std::sync::LazyLock::new(|| {
         reqwest::blocking::Client::builder()
@@ -92,8 +118,18 @@ static HTTP_CLIENT: std::sync::LazyLock<reqwest::blocking::Client> =
             .expect("failed to build HTTP client")
     });
 
+static RESPONSE_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
 pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
     tokio::task::block_in_place(|| {
+        // Check cache first
+        if let Ok(cache) = RESPONSE_CACHE.lock()
+            && let Some(body) = cache.get(url)
+        {
+            return Ok(body.clone());
+        }
+
         let response = HTTP_CLIENT
             .get(url)
             .header("User-Agent", "runx")
@@ -112,12 +148,19 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
             });
         }
 
-        response
+        let body = response
             .text()
             .map_err(|e| ProviderError::ResolutionFailed {
                 tool: tool.to_string(),
                 reason: format!("{e:#}"),
-            })
+            })?;
+
+        // Cache the response
+        if let Ok(mut cache) = RESPONSE_CACHE.lock() {
+            cache.insert(url.to_string(), body.clone());
+        }
+
+        Ok(body)
     })
 }
 
@@ -246,6 +289,36 @@ pub trait Provider {
         Vec::new()
     }
 
+    /// Return all available versions from upstream, sorted descending.
+    ///
+    /// Providers that can return a full version list in a single HTTP call
+    /// should override this for efficiency. The default implementation
+    /// resolves Latest and then scans major/minor ranges.
+    fn list_versions(&self, target: &Target) -> Result<Vec<semver::Version>, ProviderError> {
+        let latest = self.resolve_version(&crate::version::VersionSpec::Latest, target)?;
+        let max_major = latest.major;
+        let latest_minor = latest.minor;
+
+        let mut all = vec![latest];
+        for major in (0..=max_major).rev() {
+            if let Ok(v) = self.resolve_version(&crate::version::VersionSpec::Major(major), target)
+            {
+                all.push(v);
+            }
+        }
+        for minor in (0..=latest_minor).rev() {
+            if let Ok(v) = self.resolve_version(
+                &crate::version::VersionSpec::MajorMinor(max_major, minor),
+                target,
+            ) {
+                all.push(v);
+            }
+        }
+        all.sort_by(|a, b| b.cmp(a));
+        all.dedup();
+        Ok(all)
+    }
+
     /// Return an optional post-install command to run after extraction.
     ///
     /// The command runs with CWD set to `install_dir`. Placeholders
@@ -266,7 +339,7 @@ pub trait Provider {
 pub enum ProviderError {
     /// The requested tool is not supported.
     #[error(
-        "unknown tool `{name}`.\n  Supported tools: node, python, go, deno, bun\n  Run `runx list` to see all available tools."
+        "unknown tool `{name}`.\n  Supported tools: node, python, go, deno, bun, ruby, java, rust\n  Run `runx list` to see all available tools."
     )]
     UnknownTool { name: String },
 
@@ -562,12 +635,12 @@ mod tests {
 
     #[test]
     fn test_get_provider_unknown_tool_error_message() {
-        let result = get_provider("ruby");
+        let result = get_provider("zig");
         let Err(err) = result else {
             panic!("expected Err for unknown tool");
         };
         let msg = err.to_string();
-        assert!(msg.contains("ruby"));
+        assert!(msg.contains("zig"));
         assert!(msg.contains("runx list"));
     }
 
@@ -576,10 +649,10 @@ mod tests {
     #[test]
     fn test_provider_error_unknown_tool_display() {
         let err = ProviderError::UnknownTool {
-            name: "ruby".to_string(),
+            name: "zig".to_string(),
         };
         let msg = err.to_string();
-        assert!(msg.contains("unknown tool `ruby`"));
-        assert!(msg.contains("node, python, go, deno, bun"));
+        assert!(msg.contains("unknown tool `zig`"));
+        assert!(msg.contains("node, python, go, deno, bun, ruby, java, rust"));
     }
 }

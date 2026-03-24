@@ -18,7 +18,7 @@ v22.22.1
 
 That's it. Node 22 was downloaded, cached, and your command ran in a fully isolated environment. Your system wasn't touched. Next time, it starts instantly.
 
-**runx** is a single binary that replaces nvm, pyenv, goenv, and a dozen YAML lines in your CI — for **Node.js, Python, Go, Deno, and Bun** (and [any tool via plugins](#-plugins)).
+**runx** is a single binary that replaces nvm, pyenv, goenv, and a dozen YAML lines in your CI — for **Node.js, Python, Go, Deno, Bun, Ruby, Java, and Rust** (and [any tool via plugins](#-plugins)).
 
 ---
 
@@ -102,6 +102,9 @@ Single binary. No dependencies. No Node.js or Python required to run runx itself
 | **Go** | `go@1` `go@1.22.0` `golang` | go.dev |
 | **Deno** | `deno@2` `deno@2.0.0` | GitHub releases |
 | **Bun** | `bun@1` `bun@1.2.0` `bunx` | GitHub releases |
+| **Ruby** | `ruby@3` `ruby@3.3.0` `rb` | ruby-builder releases |
+| **Java** | `java@21` `java@21.0.2` `jdk` | Eclipse Adoptium API |
+| **Rust** | `rust@1` `rust@1.77.0` `rustc` `cargo` | static.rust-lang.org |
 | **Any tool** | via [plugins](#-plugins) | configurable |
 
 ### Smart version pinning
@@ -355,7 +358,7 @@ OPTIONS:
 
 ```bash
 git clone https://github.com/supa-magic/runx.git && cd runx
-cargo test                    # 343 tests
+cargo test                    # 463 tests
 cargo clippy                  # Zero warnings policy
 cargo fmt --check             # Enforced formatting
 ```

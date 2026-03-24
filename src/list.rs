@@ -2,8 +2,7 @@ use crate::cache::Cache;
 use crate::cli::ToolSpec;
 use crate::error::RunxError;
 use crate::platform::Target;
-use crate::provider::{self, Provider, ProviderError};
-use crate::version::VersionSpec;
+use crate::provider;
 
 use crate::provider::TOOL_REGISTRY;
 
@@ -123,7 +122,7 @@ async fn list_upstream(spec: &ToolSpec) -> Result<(), RunxError> {
     println!("Fetching available {} versions...", provider.name());
     println!();
 
-    let versions = fetch_available_versions(provider.as_ref(), &target)?;
+    let versions = provider.list_versions(&target)?;
 
     if versions.is_empty() {
         println!("No versions found for {}.", provider.name());
@@ -157,42 +156,6 @@ async fn list_upstream(spec: &ToolSpec) -> Result<(), RunxError> {
         provider.name()
     );
     Ok(())
-}
-
-/// Fetch all available versions from a provider's upstream.
-fn fetch_available_versions(
-    provider: &dyn Provider,
-    target: &Target,
-) -> Result<Vec<semver::Version>, ProviderError> {
-    // Resolve Latest to get the highest version, then scan major/minor versions
-    // to discover what's available upstream.
-    let latest = provider.resolve_version(&VersionSpec::Latest, target)?;
-    let max_major = latest.major;
-    let latest_minor = latest.minor;
-
-    let mut all_versions = vec![latest];
-
-    // Resolve the latest patch for each major version
-    for major in (0..=max_major).rev() {
-        if let Ok(version) = provider.resolve_version(&VersionSpec::Major(major), target) {
-            all_versions.push(version);
-        }
-    }
-
-    // Also resolve minor versions for the latest major
-    for minor in (0..=latest_minor).rev() {
-        if let Ok(version) =
-            provider.resolve_version(&VersionSpec::MajorMinor(max_major, minor), target)
-        {
-            all_versions.push(version);
-        }
-    }
-
-    // Sort descending and deduplicate
-    all_versions.sort_by(|a, b| b.cmp(a));
-    all_versions.dedup();
-
-    Ok(all_versions)
 }
 
 /// Format a byte count as a human-readable size string.
