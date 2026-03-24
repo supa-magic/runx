@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::platform::Platform;
 
@@ -11,12 +11,20 @@ const BASELINE_VARS: &[&str] = &["HOME", "USER", "LOGNAME", "TERM", "LANG", "SHE
 /// Prefixes for environment variables that are inherited when they match.
 const BASELINE_PREFIXES: &[&str] = &["LC_", "XDG_"];
 
+/// Errors that occur during environment construction.
+#[derive(Debug, thiserror::Error)]
+pub enum EnvironmentError {
+    /// Failed to create a temporary directory.
+    #[error("failed to create temp directory for `{var}`: {source}")]
+    TempDir { var: String, source: std::io::Error },
+}
+
 /// Manages per-invocation temporary directories with RAII cleanup.
 ///
 /// Some tools require writable directories (GOPATH, DENO_DIR) that should
 /// not persist after the runx invocation. This guard creates temp directories
 /// and cleans them up when dropped.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TempDirs {
     dirs: Vec<(String, tempfile::TempDir)>,
 }
@@ -24,14 +32,17 @@ pub struct TempDirs {
 impl TempDirs {
     /// Create a new empty TempDirs guard.
     pub fn new() -> Self {
-        Self { dirs: Vec::new() }
+        Self::default()
     }
 
     /// Create a temporary directory and associate it with an env var name.
     ///
     /// The directory is cleaned up when this guard is dropped.
-    pub fn create(&mut self, env_var: &str) -> Result<PathBuf, std::io::Error> {
-        let dir = tempfile::tempdir()?;
+    pub fn create(&mut self, env_var: &str) -> Result<PathBuf, EnvironmentError> {
+        let dir = tempfile::tempdir().map_err(|e| EnvironmentError::TempDir {
+            var: env_var.to_string(),
+            source: e,
+        })?;
         let path = dir.path().to_path_buf();
         self.dirs.push((env_var.to_string(), dir));
         Ok(path)
@@ -66,8 +77,12 @@ impl Environment {
     ///
     /// In inherit mode (`--inherit-env`):
     /// - PATH = tool bin dirs + user's full PATH
-    /// - All user env vars inherited
+    /// - All user env vars inherited (including `LD_PRELOAD`, `NODE_OPTIONS`, etc.)
     /// - Tool-specific env vars override user's values
+    ///
+    /// **Security note:** Inherit mode passes the entire user environment through
+    /// without filtering. This is an explicit opt-in escape hatch for users who
+    /// need their full shell context. Isolated mode (default) is the safe choice.
     pub fn build(
         platform: Platform,
         tool_bin_dirs: &[PathBuf],
