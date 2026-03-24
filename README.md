@@ -13,27 +13,46 @@
 
 ```bash
 $ runx --with node@22 -- node -v
-v22.22.1
+v22.22.2
 ```
 
 That's it. Node 22 was downloaded, cached, and your command ran in a fully isolated environment. Your system wasn't touched. Next time, it starts instantly.
 
-**runx** is a single binary that replaces nvm, pyenv, goenv, and a dozen YAML lines in your CI — for **Node.js, Python, Go, Deno, Bun, Ruby, Java, and Rust** (and [any tool via plugins](#-plugins)).
+**runx** is a single binary that replaces nvm, pyenv, goenv, and a dozen YAML lines in your CI — for **Node.js, Python, Go, Deno, Bun, Ruby, Java, and Rust** (and [any tool via plugins](#plugins)).
+
+### Supported runtimes
+
+| Runtime | Examples | Version source |
+|---------|----------|----------------|
+| **Node.js** | `node@18` `node@20.11.0` `nodejs` | nodejs.org |
+| **Python** | `python@3.12` `python@3.12.1` `python3` | python-build-standalone |
+| **Go** | `go@1` `go@1.22.0` `golang` | go.dev |
+| **Deno** | `deno@2` `deno@2.0.0` | GitHub releases |
+| **Bun** | `bun@1` `bun@1.2.0` `bunx` | GitHub releases |
+| **Ruby** | `ruby@3` `ruby@3.3.0` `rb` | ruby-builder releases |
+| **Java** | `java@21` `java@21.0.2` `jdk` | Eclipse Adoptium API |
+| **Rust** | `rust@1` `rust@1.77.0` `rustc` `cargo` | static.rust-lang.org |
+| **Any tool** | via [plugins](#plugins) | configurable |
+
+| Problem | Before runx | With runx |
+|---------|-------------|-----------|
+| "Works on my machine" | Everyone has different versions | `.runxrc` pins versions for the whole team |
+| Testing across versions | `nvm use 18`, test, `nvm use 22`, test | `runx --with node@18 -- npm test` |
+| CI/CD tool setup | `actions/setup-node` + `actions/setup-python` + ... | `runx --with node@22 -- npm run build` |
+| Onboarding a new dev | "Follow these 12 setup steps..." | `git clone && runx -- npm start` |
+| Trying a new runtime | Install globally, use once, forget to uninstall | `runx --with bun -- bun run index.ts` |
+| Environment pollution | `NVM_DIR`, `PYENV_ROOT` leaking everywhere | Isolated clean-room env every time |
 
 ---
 
 ## Examples
-
-> **"Install Node 18, Python 3.12, and Go 1.22. Oh, and make sure it's the same versions as production."**
-
-Sound familiar? Here's how runx eliminates that:
 
 ```bash
 runx --with node -- npm test
 runx --with python -- python3 app.py
 runx --with java -- javac Main.java && java Main
 runx --with ruby -- ruby -e "puts 'hello from Ruby'"
-runx --with rust -- cargo init hello && cd hello && cargo run
+runx --with rust -- cargo build --release
 runx --with go -- go run main.go
 ```
 
@@ -41,29 +60,21 @@ runx --with go -- go run main.go
 <summary><b>Node.js</b> — run any version without nvm</summary>
 
 ```bash
-# Latest stable Node — no version needed
+# Latest stable — no version needed
 runx --with node -- node -v
 
 # Test against multiple versions
 runx --with node@18 -- npm test
 runx --with node@22 -- npm test
 
-# Next.js
+# Next.js, Vite, Astro — any npx tool
 runx --with node -- npx create-next-app@latest my-app
-runx --with node@22 -- npm run dev
-
-# Vite + React
 runx --with node -- npx create-vite my-app --template react-ts
+runx --with node -- npx create-astro@latest
 
-# Express API
-runx --with node@20 -- node server.js
-
-# Vercel, Netlify, Wrangler — any npx tool
+# Deploy with Vercel, Wrangler, Netlify
 runx --with node -- npx vercel deploy
 runx --with node -- npx wrangler dev
-
-# Astro, Nuxt, SvelteKit — whatever you need
-runx --with node -- npx create-astro@latest
 ```
 
 </details>
@@ -72,25 +83,20 @@ runx --with node -- npx create-astro@latest
 <summary><b>Python</b> — isolated Python without pyenv or conda</summary>
 
 ```bash
-# Latest stable Python
+# Latest stable
 runx --with python -- python3 --version
 
-# Django
+# Django, FastAPI, Flask
 runx --with python -- pip install django && django-admin startproject mysite
-
-# FastAPI
 runx --with python@3.12 -- pip install "fastapi[standard]" && uvicorn main:app
+runx --with python -- pip install flask && python3 app.py
 
 # Data science
 runx --with python@3.11 -- pip install pandas numpy && python3 analyze.py
 
-# Flask
-runx --with python -- pip install flask && python3 app.py
-
 # Test across versions
 runx --with python@3.11 -- pytest
 runx --with python@3.12 -- pytest
-runx --with python@3.13 -- pytest
 ```
 
 </details>
@@ -99,23 +105,16 @@ runx --with python@3.13 -- pytest
 <summary><b>Go</b> — any Go version, zero goenv</summary>
 
 ```bash
-# Latest stable Go
-runx --with go -- go version
-
 # Build and run
 runx --with go -- go run main.go
-
-# Gin web framework
-runx --with go -- go run github.com/gin-gonic/gin/examples/basic
-
-# Test with a specific Go version
-runx --with go@1.22 -- go test ./...
-
-# Build a static binary
 runx --with go -- go build -ldflags="-s -w" -o myapp .
 
-# Hugo static site generator
+# Gin, Hugo
+runx --with go -- go run github.com/gin-gonic/gin/examples/basic
 runx --with go -- go run github.com/gohugoio/hugo@latest new site mysite
+
+# Test with a specific version
+runx --with go@1.22 -- go test ./...
 ```
 
 </details>
@@ -124,22 +123,16 @@ runx --with go -- go run github.com/gohugoio/hugo@latest new site mysite
 <summary><b>Deno</b> — secure TypeScript runtime</summary>
 
 ```bash
-# Latest Deno — try it instantly
-runx --with deno -- deno --version
-
 # Run TypeScript directly
 runx --with deno -- deno run server.ts
 
-# Fresh web framework
+# Fresh framework
 runx --with deno -- deno run -A https://fresh.deno.dev my-fresh-app
 
-# Deno's built-in tools
+# Built-in tools
 runx --with deno -- deno fmt
 runx --with deno -- deno lint
 runx --with deno -- deno test
-
-# Run remote scripts safely
-runx --with deno -- deno run --allow-net https://examples.deno.land/hello-world.ts
 ```
 
 </details>
@@ -148,20 +141,13 @@ runx --with deno -- deno run --allow-net https://examples.deno.land/hello-world.
 <summary><b>Bun</b> — blazing-fast JavaScript runtime</summary>
 
 ```bash
-# Latest Bun
-runx --with bun -- bun --version
-
 # Run TypeScript with zero config
 runx --with bun -- bun run index.ts
 
-# Elysia (Bun-native web framework)
+# Elysia framework
 runx --with bun -- bun create elysia my-app && cd my-app && bun run dev
 
-# Install and run — faster than npm
-runx --with bun -- bun install && bun run dev
-
-# Use bunx (like npx, but faster)
-runx --with bun -- bunx cowsay "hello from bun"
+# bunx (like npx, but faster)
 runx --with bun -- bunx prisma generate
 ```
 
@@ -171,45 +157,27 @@ runx --with bun -- bunx prisma generate
 <summary><b>Ruby</b> — prebuilt Ruby, no compilation wait</summary>
 
 ```bash
-# Latest stable Ruby
-runx --with ruby -- ruby -v
-
-# Ruby on Rails
+# Rails, Sinatra, Jekyll
 runx --with ruby -- gem install rails && rails new myapp
-runx --with ruby@3.3 -- rails server
-
-# Sinatra
 runx --with ruby -- gem install sinatra && ruby app.rb
-
-# Jekyll static site
 runx --with ruby -- gem install jekyll && jekyll new myblog
 
-# Run tests with RSpec
+# Test with RSpec
 runx --with ruby -- gem install rspec && rspec
-
-# Rake tasks
-runx --with ruby@3 -- gem install rake && rake build
 ```
 
 </details>
 
 <details>
-<summary><b>Java</b> — any JDK version via Adoptium (JAVA_HOME set automatically)</summary>
+<summary><b>Java</b> — any JDK via Adoptium (JAVA_HOME set automatically)</summary>
 
 ```bash
-# Latest LTS Java
-runx --with java -- java -version
-
 # Compile and run
 runx --with java@21 -- javac Main.java && java Main
 
-# Spring Boot with Maven
+# Spring Boot, Gradle, Quarkus
 runx --with java@21 -- ./mvnw spring-boot:run
-
-# Gradle build
 runx --with java@21 -- ./gradlew build
-
-# Quarkus
 runx --with java@21 -- ./mvnw quarkus:dev
 
 # Test across LTS versions
@@ -226,23 +194,13 @@ runx --with java -- jshell
 <summary><b>Rust</b> — standalone toolchain, no rustup needed</summary>
 
 ```bash
-# Latest stable Rust
-runx --with rust -- rustc --version
-
-# Build a project
+# Build, test, lint
 runx --with rust -- cargo build --release
-
-# Create and run a new project
-runx --with rust -- cargo init hello && cd hello && cargo run
-
-# Actix Web
-runx --with rust -- cargo add actix-web && cargo run
-
-# Run tests
 runx --with rust -- cargo test
-
-# Clippy + fmt
 runx --with rust -- cargo clippy && cargo fmt --check
+
+# New project
+runx --with rust -- cargo init hello && cd hello && cargo run
 ```
 
 </details>
@@ -251,14 +209,8 @@ runx --with rust -- cargo clippy && cargo fmt --check
 <summary><b>Multiple runtimes</b> — download in parallel</summary>
 
 ```bash
-# Full-stack: Node frontend + Python backend
 runx --with node@22 --with python@3.12 -- npm run fullstack
-
-# Java backend + Node frontend
 runx --with java@21 --with node@22 -- ./build-all.sh
-
-# Polyglot testing
-runx --with go --with rust -- ./integration-tests.sh
 ```
 
 </details>
@@ -267,38 +219,24 @@ runx --with go --with rust -- ./integration-tests.sh
 
 ## Team Configuration
 
-Stop asking "which version do I need?" — commit a `.runxrc` file:
+Commit a `.runxrc` file — every developer and CI job gets the same versions:
 
 ```toml
-# .runxrc — commit this to your repo
+# .runxrc
 tools = ["node@22", "python@3.12"]
 ```
 
-Now every developer and CI job runs:
-
 ```bash
 runx -- npm start              # Picks up node@22 from .runxrc
-runx -- python3 manage.py      # Picks up python@3.12 from .runxrc
+runx -- python3 manage.py      # Picks up python@3.12
 ```
-
-**No flags. No setup. Same versions everywhere.**
 
 <details>
 <summary><b>.runxrc examples for popular stacks</b></summary>
 
 ```toml
-# Full-stack JavaScript
-tools = ["node@22"]
-```
-
-```toml
-# Python web app
-tools = ["python@3.12"]
-```
-
-```toml
-# Go microservice
-tools = ["go@1"]
+# Full-stack: Node frontend + Python backend
+tools = ["node@22", "python@3.12"]
 ```
 
 ```toml
@@ -307,27 +245,44 @@ tools = ["java@21"]
 ```
 
 ```toml
-# Ruby on Rails
-tools = ["ruby@3"]
-```
-
-```toml
-# Rust CLI tool
-tools = ["rust@1"]
-```
-
-```toml
-# Full-stack: Node frontend + Python backend
-tools = ["node@22", "python@3.12"]
-```
-
-```toml
-# Monorepo with everything
+# Monorepo
 tools = ["node@22", "python@3.12", "go@1"]
 inherit_env = true
 ```
 
 </details>
+
+### Version pinning
+
+```bash
+runx --with node@22         -- node -v   # Latest 22.x.x
+runx --with node@22.11      -- node -v   # Latest 22.11.x
+runx --with node@22.11.0    -- node -v   # Exact version
+runx --with node             -- node -v   # Latest stable
+```
+
+### Lockfile
+
+```bash
+runx lock                    # Resolve .runxrc → .runxrc.lock (exact versions + URLs + checksums)
+runx lock --update           # Re-resolve and update
+```
+
+When `.runxrc.lock` exists, runx skips version resolution — same binary, every time. Commit it alongside `.runxrc`.
+
+### CI/CD
+
+```yaml
+# .github/workflows/ci.yml — no setup-node, no setup-python, just runx
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -sL https://github.com/supa-magic/runx/releases/latest/download/runx-x86_64-unknown-linux-gnu.tar.gz | tar xz
+      - run: ./runx -- npm test
+      - run: ./runx -- python3 -m pytest
+```
 
 ```bash
 runx init                                    # Interactive setup wizard
@@ -344,20 +299,11 @@ runx init --with node@22 --with python@3.12  # Non-interactive
 
 </details>
 
-### Lockfile for CI reproducibility
-
-```bash
-runx lock                    # Resolve .runxrc → .runxrc.lock (exact versions + URLs)
-runx lock --update           # Re-resolve and update
-```
-
-When `.runxrc.lock` exists, runx skips version resolution entirely — same binary, every time. Commit it alongside `.runxrc`.
-
 ---
 
 ## Self-Contained Scripts
 
-Scripts that **bring their own runtime**. Add a shebang line and the script downloads its runtime on first run.
+Scripts that **bring their own runtime**. Add a shebang line — the runtime downloads on first run.
 
 <details>
 <summary><b>deploy.js</b> — Node.js deployment script</summary>
@@ -384,7 +330,7 @@ console.log("Done!");
 </details>
 
 <details>
-<summary><b>analyze.py</b> — Python data analysis script</summary>
+<summary><b>analyze.py</b> — Python data analysis</summary>
 
 ```python
 #!/usr/bin/env -S runx --with python@3.12 --
@@ -397,8 +343,7 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 with open(sys.argv[1]) as f:
-    reader = csv.DictReader(f)
-    rows = list(reader)
+    rows = list(csv.DictReader(f))
 
 print(f"Rows: {len(rows)}")
 for col in rows[0]:
@@ -412,7 +357,7 @@ for col in rows[0]:
 </details>
 
 <details>
-<summary><b>health.rb</b> — Ruby health check script</summary>
+<summary><b>health.rb</b> — Ruby health check</summary>
 
 ```ruby
 #!/usr/bin/env -S runx --with ruby@3 --
@@ -441,48 +386,11 @@ end
 </details>
 
 <details>
-<summary><b>migrate.go</b> — Go database migration script</summary>
-
-```go
-#!/usr/bin/env -S runx --with go@1 --
-// migrate.go — run database migrations
-
-package main
-
-import (
-    "fmt"
-    "os"
-    "os/exec"
-)
-
-func main() {
-    dbURL := os.Getenv("DATABASE_URL")
-    if dbURL == "" {
-        fmt.Fprintln(os.Stderr, "DATABASE_URL not set")
-        os.Exit(1)
-    }
-
-    cmd := exec.Command("go", "run", "github.com/pressly/goose/v3/cmd/goose@latest",
-        "-dir", "./migrations", "postgres", dbURL, "up")
-    cmd.Stdout = os.Stdout
-    cmd.Stderr = os.Stderr
-
-    if err := cmd.Run(); err != nil {
-        fmt.Fprintf(os.Stderr, "Migration failed: %v\n", err)
-        os.Exit(1)
-    }
-    fmt.Println("Migrations complete!")
-}
-```
-
-</details>
-
-<details>
 <summary><b>server.ts</b> — Deno HTTP server</summary>
 
 ```ts
 #!/usr/bin/env -S runx --with deno --
-// server.ts — single-file HTTP server with Deno
+// server.ts — single-file HTTP server
 
 const port = parseInt(Deno.args[0] ?? "3000");
 
@@ -496,18 +404,15 @@ Deno.serve({ port }, (req: Request) => {
 </details>
 
 ```bash
-# Make any script executable and run it — runtime downloads automatically
-chmod +x deploy.js analyze.py health.rb migrate.go server.ts
+chmod +x deploy.js analyze.py health.rb server.ts
 
 ./deploy.js                    # Downloads Node 22 on first run, then deploys
 ./analyze.py sales.csv         # Downloads Python 3.12, analyzes the CSV
 ./health.rb                    # Downloads Ruby 3, checks all services
-./migrate.go                   # Downloads Go, runs migrations
-./server.ts                    # Downloads Deno, starts the server
-./server.ts 8080               # Arguments pass through
+./server.ts 8080               # Downloads Deno, starts the server
 ```
 
-Share scripts with your team, drop them in CI, hand them to clients — they just work. No Dockerfile, no setup instructions, no "install X first".
+Share scripts with your team, drop them in CI, hand them to clients — no setup instructions needed.
 
 ---
 
@@ -538,7 +443,6 @@ sudo mv runx /usr/local/bin/
 <summary>Build from source</summary>
 
 ```bash
-# Requires Rust toolchain
 cargo install --git https://github.com/supa-magic/runx.git
 ```
 
@@ -548,39 +452,22 @@ Single binary. No dependencies. No Node.js or Python required to run runx itself
 
 ---
 
-## Features
+## How It Works
 
-### Supported runtimes
+```
+runx --with node@22 -- node server.js
 
-| Runtime | Examples | Version source |
-|---------|----------|----------------|
-| **Node.js** | `node@18` `node@20.11.0` `nodejs` | nodejs.org |
-| **Python** | `python@3.12` `python@3.12.1` `python3` | python-build-standalone |
-| **Go** | `go@1` `go@1.22.0` `golang` | go.dev |
-| **Deno** | `deno@2` `deno@2.0.0` | GitHub releases |
-| **Bun** | `bun@1` `bun@1.2.0` `bunx` | GitHub releases |
-| **Ruby** | `ruby@3` `ruby@3.3.0` `rb` | ruby-builder releases |
-| **Java** | `java@21` `java@21.0.2` `jdk` | Eclipse Adoptium API |
-| **Rust** | `rust@1` `rust@1.77.0` `rustc` `cargo` | static.rust-lang.org |
-| **Any tool** | via [plugins](#-plugins) | configurable |
-
-### Smart version pinning
-
-```bash
-runx --with node@22         -- node -v   # Latest 22.x.x
-runx --with node@22.11      -- node -v   # Latest 22.11.x
-runx --with node@22.11.0    -- node -v   # Exact version
-runx --with node             -- node -v   # Latest stable
+  1. Resolve     node@22 → 22.22.2 (via nodejs.org API)
+  2. Download    https://nodejs.org/dist/v22.22.2/node-v22.22.2-darwin-arm64.tar.gz
+  3. Cache       ~/.runx/cache/node/22.22.2/macOS-aarch64/
+  4. Isolate     PATH = [cached node/bin] + [/usr/bin, /bin]
+  5. Execute     node server.js (in clean environment)
+  6. Exit        Forward exit code, clean up temp dirs
 ```
 
-### Parallel downloads
+Cached tools skip steps 1-3 — repeat runs start in **milliseconds**.
 
-```bash
-# Downloads Node AND Python at the same time
-runx --with node@22 --with python@3.12 -- node process.js
-```
-
-### Full environment isolation
+### Environment isolation
 
 Every command runs in a **clean-room environment** — your system PATH, `NVM_DIR`, `PYENV_ROOT`, and other tool managers are invisible:
 
@@ -588,26 +475,7 @@ Every command runs in a **clean-room environment** — your system PATH, `NVM_DI
 |-----------------|--------------------|---------|
 | `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR` | `PATH` = tool bins + `/usr/bin` | Your `PATH`, `NVM_DIR`, `PYENV_ROOT`, etc. |
 
-This means no version conflicts, no leaked env vars, and no "works on my machine" surprises.
-
 Need your full environment? Add `--inherit-env`.
-
-### Instant caching
-
-First run downloads the tool. Every subsequent run starts in **milliseconds** from cache:
-
-```bash
-$ time runx --with node@22 -- node -e "console.log('fast')"
-# First run: ~3s (download + extract)
-# Cached run: ~0.1s
-```
-
-### Preview mode
-
-```bash
-runx --dry-run --with node@22 -- node -v
-# Shows what would be downloaded and executed, without doing it
-```
 
 ---
 
@@ -620,31 +488,23 @@ runx install node@22              # Symlink → ~/.runx/bin/node
 runx install python@3.12          # Symlink → ~/.runx/bin/python3
 runx install                      # Install everything from .runxrc
 
-node -v                           # v22.22.1
-python3 --version                 # Python 3.12.13
-
 runx install --list               # See what's installed
 runx uninstall node               # Remove it
 runx update                       # Update all to latest patches
-runx update node                  # Update just Node.js
 ```
 
-Add to your shell profile once:
-```bash
-export PATH="$HOME/.runx/bin:$PATH"
-```
+Add to your shell profile once: `export PATH="$HOME/.runx/bin:$PATH"`
 
 ---
 
 ## Plugins
 
-Add **any tool** — not just the 8 built-in runtimes — with a simple TOML file:
+Add **any tool** — not just the 8 built-in runtimes — with a TOML manifest:
 
 ```toml
 # ~/.runx/plugins/zig.toml
 name = "zig"
 aliases = ["ziglang"]
-description = "Zig programming language"
 download_url = "https://ziglang.org/builds/zig-{os}-{arch}-{version}.tar.xz"
 archive_format = "tar.xz"
 bin_path = "zig-{os}-{arch}-{version}"
@@ -652,20 +512,19 @@ bin_path = "zig-{os}-{arch}-{version}"
 
 ```bash
 runx plugin add ./zig.toml
-runx --with zig@0.11.0 -- zig version   # Works like any built-in tool
-
-runx plugin list                          # See installed plugins
-runx plugin remove zig                    # Uninstall
+runx --with zig@0.11.0 -- zig version
+runx plugin list
+runx plugin remove zig
 ```
 
-Placeholders `{version}`, `{os}`, `{arch}`, `{triple}`, `{os_alt}`, `{arch_alt}` are expanded automatically. Share plugin files with your team or the community.
+Placeholders: `{version}`, `{os}`, `{arch}`, `{triple}`, `{os_alt}`, `{arch_alt}`.
 
 ---
 
 ## Cache Management
 
 ```bash
-runx list                      # See all tools and what's cached
+runx list                      # All tools and cache status
 runx list --cached             # Cached versions with disk sizes
 runx list node                 # Query upstream for available versions
 
@@ -680,29 +539,10 @@ runx clean -y                  # Skip confirmation
 ## Shell Completions
 
 ```bash
-eval "$(runx completions bash)"    # Bash — add to ~/.bashrc
-eval "$(runx completions zsh)"     # Zsh — add to ~/.zshrc
-runx completions fish | source     # Fish — add to config.fish
+eval "$(runx completions bash)"    # add to ~/.bashrc
+eval "$(runx completions zsh)"     # add to ~/.zshrc
+runx completions fish | source     # add to config.fish
 ```
-
----
-
-## How It Works
-
-```
-runx --with node@22 -- node server.js
-
-  1. Resolve     node@22 → 22.22.1 (via nodejs.org API)
-  2. Download    https://nodejs.org/dist/v22.22.1/node-v22.22.1-darwin-arm64.tar.gz
-  3. Cache       ~/.runx/cache/node/22.22.1/macOS-aarch64/
-  4. Isolate     PATH = [cached node/bin] + [/usr/bin, /bin]
-  5. Execute     node server.js (in clean environment)
-  6. Exit        Forward exit code, clean up temp dirs
-```
-
-Cached tools skip steps 1-3 — repeat runs start in **milliseconds**.
-
-Written in Rust. Single binary. No runtime dependencies.
 
 ---
 
@@ -714,15 +554,15 @@ USAGE:
   runx <SUBCOMMAND>                  Manage tools, cache, and config
 
 SUBCOMMANDS:
-  init         Create .runxrc config file (interactive or --with flags)
+  init         Create .runxrc config file
   install      Install tools globally to ~/.runx/bin/
   uninstall    Remove globally installed tools
   list         List tools, cached versions, or upstream availability
-  clean        Remove cached binaries to free disk space
+  clean        Remove cached binaries
   lock         Generate .runxrc.lock for reproducible builds
   update       Update cached tools to latest patch versions
-  plugin       Manage custom tool provider plugins (list/add/remove)
-  completions  Generate shell completion scripts (bash/zsh/fish)
+  plugin       Manage plugin providers (list/add/remove)
+  completions  Generate shell completions (bash/zsh/fish)
 
 OPTIONS:
   --with <TOOL@VERSION>   Tool to include (repeatable)
@@ -730,7 +570,6 @@ OPTIONS:
   --inherit-env           Pass through your full shell environment
   -v, --verbose           Show download progress and debug info
   -q, --quiet             Suppress all progress output
-  -V, --version           Print version
   -h, --help              Print help
 ```
 
@@ -745,7 +584,7 @@ cargo clippy                  # Zero warnings policy
 cargo fmt --check             # Enforced formatting
 ```
 
-We welcome contributions! Check the [open issues](https://github.com/supa-magic/runx/issues) for ideas.
+[Open issues](https://github.com/supa-magic/runx/issues) — contributions welcome.
 
 ## License
 
