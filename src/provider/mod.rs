@@ -16,6 +16,44 @@ pub use go::GoProvider;
 pub use node::NodeProvider;
 pub use python::PythonProvider;
 
+/// Canonical registry of all supported tools with their aliases and interpreter commands.
+///
+/// Single source of truth — used by `get_provider`, `list`, `init`, and `tool_interpreter`.
+pub const TOOL_REGISTRY: &[ToolEntry] = &[
+    ToolEntry {
+        name: "node",
+        aliases: &["nodejs"],
+        interpreter: &["node"],
+    },
+    ToolEntry {
+        name: "python",
+        aliases: &["python3"],
+        interpreter: &["python3"],
+    },
+    ToolEntry {
+        name: "go",
+        aliases: &["golang"],
+        interpreter: &["go", "run"],
+    },
+    ToolEntry {
+        name: "deno",
+        aliases: &[],
+        interpreter: &["deno", "run"],
+    },
+    ToolEntry {
+        name: "bun",
+        aliases: &["bunx"],
+        interpreter: &["bun", "run"],
+    },
+];
+
+/// A registered tool with its aliases and default interpreter command.
+pub struct ToolEntry {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub interpreter: &'static [&'static str],
+}
+
 /// Look up a provider by tool name.
 ///
 /// Returns the appropriate `Provider` implementation for the given tool,

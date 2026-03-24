@@ -5,11 +5,8 @@ use crate::cli::ToolSpec;
 use crate::error::RunxError;
 use crate::provider;
 
-/// The `.runxrc` config file name.
-const CONFIG_FILE_NAME: &str = ".runxrc";
-
-/// Supported tools for interactive selection.
-const AVAILABLE_TOOLS: &[&str] = &["node", "python", "go", "deno", "bun"];
+use crate::config::CONFIG_FILE_NAME;
+use crate::provider::TOOL_REGISTRY;
 
 /// Execute the `runx init` subcommand.
 pub fn run(tools: &[ToolSpec], force: bool) -> Result<(), RunxError> {
@@ -72,8 +69,8 @@ fn prompt_tools() -> Result<Vec<ToolSpec>, RunxError> {
         "Which tools do you need? (enter numbers separated by spaces, or press Enter to skip)"
     );
     println!();
-    for (i, tool) in AVAILABLE_TOOLS.iter().enumerate() {
-        println!("  {}. {}", i + 1, tool);
+    for (i, entry) in TOOL_REGISTRY.iter().enumerate() {
+        println!("  {}. {}", i + 1, entry.name);
     }
     println!();
 
@@ -83,9 +80,9 @@ fn prompt_tools() -> Result<Vec<ToolSpec>, RunxError> {
     for token in input.split_whitespace() {
         if let Ok(num) = token.parse::<usize>()
             && num >= 1
-            && num <= AVAILABLE_TOOLS.len()
+            && num <= TOOL_REGISTRY.len()
         {
-            let name = AVAILABLE_TOOLS[num - 1];
+            let name = TOOL_REGISTRY[num - 1].name;
             let version = prompt_version(name)?;
             specs.push(ToolSpec {
                 name: name.to_string(),
@@ -227,10 +224,11 @@ mod tests {
 
     #[test]
     fn test_available_tools_matches_providers() {
-        for tool in AVAILABLE_TOOLS {
+        for entry in TOOL_REGISTRY {
             assert!(
-                crate::provider::get_provider(tool).is_ok(),
-                "AVAILABLE_TOOLS contains unknown tool: {tool}"
+                crate::provider::get_provider(entry.name).is_ok(),
+                "TOOL_REGISTRY contains unknown tool: {}",
+                entry.name
             );
         }
     }

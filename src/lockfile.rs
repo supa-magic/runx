@@ -28,16 +28,7 @@ pub struct Lockfile {
 
 /// Find the lockfile by walking up from `start_dir`.
 pub fn find_lockfile(start_dir: &Path) -> Option<PathBuf> {
-    let mut dir = start_dir.to_path_buf();
-    loop {
-        let candidate = dir.join(LOCKFILE_NAME);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    crate::config::find_ancestor_file(start_dir, LOCKFILE_NAME)
 }
 
 /// Load a lockfile from disk.

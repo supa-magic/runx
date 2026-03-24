@@ -243,6 +243,9 @@ Commands:
   list         List available tools and cached versions
   clean        Remove cached tool binaries
   init         Scaffold a .runxrc config file
+  lock         Generate .runxrc.lock for reproducible builds
+  update       Update cached tools to latest patch versions
+  plugin       Manage custom tool provider plugins
   completions  Generate shell completions (bash, zsh, fish)
 
 Options:

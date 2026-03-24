@@ -293,14 +293,15 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
 ///
 /// Returns `None` if the tool doesn't have a natural script-running mode.
 fn tool_interpreter(tool_name: &str) -> Option<Vec<String>> {
-    match tool_name {
-        "node" | "nodejs" => Some(vec!["node".to_string()]),
-        "python" | "python3" => Some(vec!["python3".to_string()]),
-        "deno" => Some(vec!["deno".to_string(), "run".to_string()]),
-        "bun" | "bunx" => Some(vec!["bun".to_string(), "run".to_string()]),
-        "go" | "golang" => Some(vec!["go".to_string(), "run".to_string()]),
-        _ => None,
+    for entry in provider::TOOL_REGISTRY {
+        if entry.name == tool_name || entry.aliases.contains(&tool_name) {
+            if entry.interpreter.is_empty() {
+                return None;
+            }
+            return Some(entry.interpreter.iter().map(|s| s.to_string()).collect());
+        }
     }
+    None
 }
 
 /// Detect if cmd[0] is a script file and prepend the interpreter if needed.

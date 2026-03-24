@@ -59,3 +59,66 @@ pub enum RunxError {
     #[error("I/O error: {0}")]
     Io(std::io::Error),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_no_command_display() {
+        let err = RunxError::NoCommand;
+        let msg = err.to_string();
+        assert!(msg.contains("no command specified"));
+        assert!(msg.contains("Example:"));
+    }
+
+    #[test]
+    fn test_no_tools_display() {
+        let err = RunxError::NoTools;
+        let msg = err.to_string();
+        assert!(msg.contains("no tools specified"));
+        assert!(msg.contains("--with"));
+    }
+
+    #[test]
+    fn test_unsupported_platform_display() {
+        let err = RunxError::UnsupportedPlatform("RISC-V".to_string());
+        assert!(err.to_string().contains("RISC-V"));
+    }
+
+    #[test]
+    fn test_no_cwd_display() {
+        let err = RunxError::NoCwd(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "access denied",
+        ));
+        let msg = err.to_string();
+        assert!(msg.contains("cannot determine current directory"));
+        assert!(msg.contains("access denied"));
+    }
+
+    #[test]
+    fn test_io_display() {
+        let err = RunxError::Io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        ));
+        assert!(err.to_string().contains("broken pipe"));
+    }
+
+    #[test]
+    fn test_provider_error_converts() {
+        let err: RunxError = ProviderError::UnknownTool {
+            name: "ruby".to_string(),
+        }
+        .into();
+        assert!(matches!(err, RunxError::Provider(_)));
+        assert!(err.to_string().contains("ruby"));
+    }
+
+    #[test]
+    fn test_cache_error_converts() {
+        let err: RunxError = CacheError::NoHomeDir.into();
+        assert!(matches!(err, RunxError::Cache(_)));
+    }
+}

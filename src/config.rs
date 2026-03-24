@@ -5,7 +5,21 @@ use serde::Deserialize;
 use crate::cli::ToolSpec;
 
 /// The `.runxrc` config file name.
-const CONFIG_FILE_NAME: &str = ".runxrc";
+pub const CONFIG_FILE_NAME: &str = ".runxrc";
+
+/// Walk up from `start_dir` looking for a file with `name`.
+pub fn find_ancestor_file(start_dir: &Path, name: &str) -> Option<PathBuf> {
+    let mut dir = start_dir.to_path_buf();
+    loop {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
 
 /// Parsed `.runxrc` configuration.
 #[derive(Debug, Clone, Default)]
@@ -56,16 +70,7 @@ pub fn load_config(start_dir: &Path) -> Result<Config, ConfigError> {
 
 /// Walk up from `start_dir` looking for `.runxrc`.
 fn find_config(start_dir: &Path) -> Option<PathBuf> {
-    let mut dir = start_dir.to_path_buf();
-    loop {
-        let candidate = dir.join(CONFIG_FILE_NAME);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    find_ancestor_file(start_dir, CONFIG_FILE_NAME)
 }
 
 /// Parse a `.runxrc` TOML file into a `Config`.

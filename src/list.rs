@@ -5,14 +5,7 @@ use crate::platform::Target;
 use crate::provider::{self, Provider, ProviderError};
 use crate::version::VersionSpec;
 
-/// All supported tool names and their aliases.
-const SUPPORTED_TOOLS: &[(&str, &[&str])] = &[
-    ("node", &["nodejs"]),
-    ("python", &["python3"]),
-    ("go", &["golang"]),
-    ("deno", &[]),
-    ("bun", &["bunx"]),
-];
+use crate::provider::TOOL_REGISTRY;
 
 /// Execute the `runx list` subcommand.
 pub async fn run(cached: bool, tool: Option<ToolSpec>) -> Result<(), RunxError> {
@@ -36,16 +29,16 @@ fn list_providers() -> Result<(), RunxError> {
     println!("  {:<12} {:<16} Cached", "Tool", "Aliases");
     println!("  {:<12} {:<16} ──────", "────", "───────");
 
-    for (name, aliases) in SUPPORTED_TOOLS {
-        let alias_str = if aliases.is_empty() {
+    for entry in TOOL_REGISTRY {
+        let alias_str = if entry.aliases.is_empty() {
             "—".to_string()
         } else {
-            aliases.join(", ")
+            entry.aliases.join(", ")
         };
 
         let cached_info = cached_tools
             .iter()
-            .find(|t| t.name == *name)
+            .find(|t| t.name == entry.name)
             .map(|t| {
                 let count = t.versions.len();
                 let size = format_size(t.size_bytes);
@@ -56,7 +49,7 @@ fn list_providers() -> Result<(), RunxError> {
             })
             .unwrap_or_else(|| "—".to_string());
 
-        println!("  {:<12} {:<16} {}", name, alias_str, cached_info);
+        println!("  {:<12} {:<16} {}", entry.name, alias_str, cached_info);
     }
 
     println!();
@@ -239,13 +232,14 @@ mod tests {
 
     #[test]
     fn test_supported_tools_complete() {
-        // Verify all tools in SUPPORTED_TOOLS are recognized by get_provider
-        for (name, aliases) in SUPPORTED_TOOLS {
+        // Verify all tools in TOOL_REGISTRY are recognized by get_provider
+        for entry in TOOL_REGISTRY {
             assert!(
-                provider::get_provider(name).is_ok(),
-                "provider not found for {name}"
+                provider::get_provider(entry.name).is_ok(),
+                "provider not found for {}",
+                entry.name
             );
-            for alias in *aliases {
+            for alias in entry.aliases {
                 assert!(
                     provider::get_provider(alias).is_ok(),
                     "provider not found for alias {alias}"
