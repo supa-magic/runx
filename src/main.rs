@@ -6,6 +6,7 @@ mod download;
 mod environment;
 mod error;
 mod executor;
+mod init;
 mod list;
 mod platform;
 mod provider;
@@ -180,7 +181,31 @@ mod tests {
     #[test]
     fn test_parse_init_subcommand() {
         let cli = Cli::try_parse_from(["runx", "init"]).unwrap();
-        assert!(matches!(cli.command, Some(Command::Init)));
+        assert!(matches!(cli.command, Some(Command::Init { .. })));
+    }
+
+    #[test]
+    fn test_parse_init_with_tools() {
+        let cli =
+            Cli::try_parse_from(["runx", "init", "--with", "node@18", "--with", "python@3.11"])
+                .unwrap();
+        let Some(Command::Init { tools, force }) = cli.command else {
+            panic!("expected Init subcommand");
+        };
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "node");
+        assert_eq!(tools[1].name, "python");
+        assert!(!force);
+    }
+
+    #[test]
+    fn test_parse_init_force() {
+        let cli = Cli::try_parse_from(["runx", "init", "--force"]).unwrap();
+        let Some(Command::Init { tools, force }) = cli.command else {
+            panic!("expected Init subcommand");
+        };
+        assert!(tools.is_empty());
+        assert!(force);
     }
 
     #[test]

@@ -152,7 +152,15 @@ pub enum Command {
     },
 
     /// Scaffold a .runxrc config file in the current directory
-    Init,
+    Init {
+        /// Tool to include (repeatable, e.g. --with node@18)
+        #[arg(long = "with", value_name = "TOOL@VERSION")]
+        tools: Vec<ToolSpec>,
+
+        /// Overwrite existing .runxrc file
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[cfg(test)]

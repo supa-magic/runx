@@ -27,8 +27,8 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
         Some(Command::List { cached, tool }) => {
             crate::list::run(cached, tool).await?;
         }
-        Some(Command::Init) => {
-            println!("init: scaffolding .runxrc");
+        Some(Command::Init { tools, force }) => {
+            crate::init::run(&tools, force)?;
         }
         None => {
             if cli.cmd.is_empty() {
@@ -255,7 +255,7 @@ async fn run_command(cli: &Cli) -> Result<(), RunxError> {
 mod tests {
     use clap::Parser;
 
-    use crate::cli::Cli;
+    use crate::cli::{Cli, Command};
     use crate::error::RunxError;
 
     use super::run;
@@ -300,9 +300,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_init_subcommand() {
-        let cli = Cli::try_parse_from(["runx", "init"]).unwrap();
-        assert!(run(cli).await.is_ok());
+    async fn test_run_init_subcommand_parses() {
+        // Verify init subcommand parses correctly (don't actually run it,
+        // since it writes to CWD which conflicts with parallel tests)
+        let cli = Cli::try_parse_from(["runx", "init", "--with", "node@18", "--force"]).unwrap();
+        assert!(matches!(cli.command, Some(Command::Init { .. })));
     }
 
     #[tokio::test]
