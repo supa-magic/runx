@@ -1,3 +1,5 @@
+use crate::cache::CacheError;
+use crate::download::DownloadError;
 use crate::provider::ProviderError;
 
 /// Errors that can occur during runx execution.
@@ -25,4 +27,12 @@ pub enum RunxError {
     /// A provider operation failed.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+
+    /// A cache operation failed.
+    #[error(transparent)]
+    Cache(#[from] CacheError),
+
+    /// A download operation failed.
+    #[error(transparent)]
+    Download(#[from] DownloadError),
 }
