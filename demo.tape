@@ -5,28 +5,30 @@ Output demo.gif
 Set Theme "Dracula"
 Set FontSize 16
 Set Width 900
-Set Height 520
+Set Height 550
 Set Padding 20
 Set TypingSpeed 35ms
-Set Shell "zsh"
+Set Shell "bash"
 Env PATH "/usr/local/bin:/Users/ab/.runx/bin:/opt/homebrew/bin:/usr/bin:/bin"
 Env HOME "/Users/ab"
 
 # Install
-Type "# Install runx with one command"
+Type "echo '→ Install runx with one command'"
 Enter
 Sleep 500ms
 Type "curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh"
 Enter
 Sleep 8s
 
-# Add to PATH
 Type 'export PATH="$HOME/.runx/bin:$PATH"'
 Enter
-Sleep 1s
+Sleep 500ms
+Type "clear"
+Enter
+Sleep 500ms
 
 # Node
-Type "# Node.js — no nvm needed"
+Type "echo '→ Node.js — no nvm needed'"
 Enter
 Sleep 500ms
 Type "runx --with node@22 -- node -v"
@@ -34,7 +36,7 @@ Enter
 Sleep 5s
 
 # Python
-Type "# Python — no pyenv, no conda"
+Type "echo '→ Python — no pyenv, no conda'"
 Enter
 Sleep 500ms
 Type "runx --with python@3.12 -- python3 --version"
@@ -42,7 +44,7 @@ Enter
 Sleep 5s
 
 # Cached
-Type "# Second run is instant (cached)"
+Type "echo '→ Second run is instant (cached)'"
 Enter
 Sleep 500ms
 Type "runx --with node@22 -- node -v"
@@ -50,7 +52,7 @@ Enter
 Sleep 2s
 
 # Vite + React
-Type "# Create a React app with Vite — zero global installs"
+Type "echo '→ Create a React app with Vite'"
 Enter
 Sleep 500ms
 Type "runx --with node -- npx create-vite my-app --template react"
@@ -58,7 +60,10 @@ Enter
 Sleep 10s
 
 # .runxrc
-Type "# Pin versions for your team"
+Type "clear"
+Enter
+Sleep 500ms
+Type "echo '→ Pin versions for your team'"
 Enter
 Sleep 500ms
 Type 'echo '"'"'tools = ["node@22"]'"'"' > .runxrc && cat .runxrc'
