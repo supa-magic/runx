@@ -11,6 +11,7 @@ mod install;
 mod list;
 mod lockfile;
 mod platform;
+mod plugin;
 mod provider;
 mod run;
 mod update;

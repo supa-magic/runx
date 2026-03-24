@@ -27,9 +27,15 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
         "go" | "golang" => Ok(Box::new(GoProvider)),
         "deno" => Ok(Box::new(DenoProvider)),
         "bun" | "bunx" => Ok(Box::new(BunProvider)),
-        other => Err(ProviderError::UnknownTool {
-            name: other.to_string(),
-        }),
+        other => {
+            // Check for plugins before returning UnknownTool
+            if let Ok(Some(provider)) = crate::plugin::get_plugin_provider(other) {
+                return Ok(provider);
+            }
+            Err(ProviderError::UnknownTool {
+                name: other.to_string(),
+            })
+        }
     }
 }
 

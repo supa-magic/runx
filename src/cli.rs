@@ -212,6 +212,18 @@ pub enum Command {
         tool: Option<ToolSpec>,
     },
 
+    /// Manage tool provider plugins
+    #[command(
+        after_help = "Examples:\n  runx plugin list                   Show installed plugins\n  runx plugin add ./zig.toml         Install a plugin\n  runx plugin remove zig             Remove a plugin"
+    )]
+    Plugin {
+        /// Plugin action: list, add, or remove
+        action: String,
+
+        /// Plugin name or path (for add/remove)
+        arg: Option<String>,
+    },
+
     /// Generate shell completions for bash, zsh, or fish
     #[command(
         after_help = "Examples:\n  runx completions bash > ~/.bash_completion.d/runx\n  runx completions zsh > ~/.zfunc/_runx\n  runx completions fish > ~/.config/fish/completions/runx.fish"

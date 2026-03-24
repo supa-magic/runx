@@ -42,6 +42,9 @@ pub async fn run(cli: Cli) -> Result<(), RunxError> {
         Some(Command::Update { tool }) => {
             crate::update::run(tool, cli.dry_run).await?;
         }
+        Some(Command::Plugin { action, arg }) => {
+            crate::plugin::run_plugin_command(&action, arg.as_deref())?;
+        }
         Some(Command::Completions { shell }) => {
             generate_completions(shell);
         }
