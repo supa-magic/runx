@@ -603,6 +603,8 @@ curl -s https://api.github.com/repos/supa-magic/runx | ./json.js
 
 Every script above works immediately after `chmod +x` — no project setup, no `npm install`, no API keys. Share them with your team or drop them in any repo.
 
+> **Windows note:** Shebangs (`#!`) are a Unix feature. On Windows, run scripts explicitly: `runx --with node@22 -- node serve.js`
+
 ---
 
 ## How It Works
