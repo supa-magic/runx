@@ -27,8 +27,67 @@ pub fn get_provider(name: &str) -> Result<Box<dyn Provider>, ProviderError> {
     }
 }
 
+// --- Shared helpers ---
+
+/// Fetch JSON from a URL using blocking HTTP inside an async context.
+///
+/// Uses `tokio::task::block_in_place` to bridge blocking `reqwest` into
+/// the tokio runtime. All providers use this to avoid duplicating HTTP logic.
+pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
+    tokio::task::block_in_place(|| {
+        reqwest::blocking::Client::new()
+            .get(url)
+            .header("User-Agent", "runx")
+            .header("Accept", "application/json")
+            .send()
+            .map_err(|e| ProviderError::ResolutionFailed {
+                tool: tool.to_string(),
+                reason: format!("{e:#}"),
+            })?
+            .text()
+            .map_err(|e| ProviderError::ResolutionFailed {
+                tool: tool.to_string(),
+                reason: format!("{e:#}"),
+            })
+    })
+}
+
+/// Collect unique stable versions from an iterator of optional versions.
+///
+/// Filters out pre-release versions and duplicates.
+pub fn collect_stable_versions(
+    versions: impl Iterator<Item = Option<semver::Version>>,
+) -> Vec<semver::Version> {
+    let mut result = Vec::new();
+    for ver in versions.flatten() {
+        if ver.pre.is_empty() && !result.contains(&ver) {
+            result.push(ver);
+        }
+    }
+    result
+}
+
+/// Resolve a version spec against a list of candidates.
+///
+/// Shared logic used by all providers: fetch candidates, resolve, or return VersionNotFound.
+pub fn resolve_from_candidates(
+    candidates: &[semver::Version],
+    spec: &VersionSpec,
+    tool: &'static str,
+) -> Result<semver::Version, ProviderError> {
+    spec.resolve(candidates)
+        .cloned()
+        .ok_or_else(|| ProviderError::VersionNotFound {
+            tool: tool.to_string(),
+            spec: spec.to_string(),
+        })
+}
+
+// --- Types ---
+
 /// Metadata about a resolved tool version ready for download.
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct ResolvedTool {
     /// The tool name (e.g., "node").
     pub name: String,
@@ -44,6 +103,7 @@ pub struct ResolvedTool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveFormat {
     TarGz,
+    #[allow(unused)]
     TarXz,
     Zip,
 }
@@ -52,14 +112,16 @@ pub enum ArchiveFormat {
 ///
 /// Each provider knows how to resolve versions, construct download URLs,
 /// and describe the binary layout and environment variables for a specific tool.
+///
+/// **Note:** `bin_paths` returns paths relative to the install directory
+/// after archive extraction. These must be directories (not individual files)
+/// since they become `PATH` entries. Providers may override the default
+/// `archive_format` from the platform if the tool uses a different format.
 pub trait Provider {
     /// The tool name (e.g., "node", "python", "go").
     fn name(&self) -> &str;
 
     /// Resolve a version spec to an exact version by querying upstream.
-    ///
-    /// For example, `@18` might resolve to `18.19.1` by checking
-    /// the tool's version index.
     fn resolve_version(
         &self,
         spec: &VersionSpec,
@@ -76,16 +138,12 @@ pub trait Provider {
     /// Return the archive format used for the given target.
     fn archive_format(&self, target: &Target) -> ArchiveFormat;
 
-    /// Return paths to binary executables relative to the install directory.
+    /// Return directory paths relative to the install directory for PATH.
     ///
-    /// For Node.js this might return `["bin/node", "bin/npm", "bin/npx"]` on Unix
-    /// or `["node.exe", "npm.cmd", "npx.cmd"]` on Windows.
+    /// These must be directories, not individual executables.
     fn bin_paths(&self, version: &semver::Version, target: &Target) -> Vec<PathBuf>;
 
     /// Return environment variables to set for this tool.
-    ///
-    /// Keys are env var names (e.g., `NODE_HOME`), values are paths
-    /// relative to the install directory.
     fn env_vars(&self, install_dir: &std::path::Path) -> HashMap<String, String>;
 }
 
@@ -108,6 +166,32 @@ pub enum ProviderError {
     /// Network or API error during version resolution.
     #[error("failed to resolve {tool} version: {reason}")]
     ResolutionFailed { tool: String, reason: String },
+}
+
+/// Shared test helpers for provider tests.
+#[cfg(test)]
+pub mod test_helpers {
+    use crate::platform::{Arch, Platform, Target};
+
+    pub fn macos_arm64() -> Target {
+        Target::new(Platform::MacOS, Arch::Aarch64)
+    }
+
+    pub fn linux_x64() -> Target {
+        Target::new(Platform::Linux, Arch::X86_64)
+    }
+
+    pub fn linux_arm64() -> Target {
+        Target::new(Platform::Linux, Arch::Aarch64)
+    }
+
+    pub fn windows_x64() -> Target {
+        Target::new(Platform::Windows, Arch::X86_64)
+    }
+
+    pub fn v(s: &str) -> semver::Version {
+        semver::Version::parse(s).unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -163,9 +247,30 @@ mod tests {
             tool: "node".to_string(),
             spec: "99".to_string(),
         };
-        // Verify it can be used as Box<dyn Error>
         let boxed: Box<dyn std::error::Error> = Box::new(err);
         assert!(boxed.source().is_none());
+    }
+
+    #[test]
+    fn test_collect_stable_versions() {
+        let versions = collect_stable_versions(
+            vec![
+                Some(semver::Version::new(1, 0, 0)),
+                None,
+                Some(semver::Version::new(2, 0, 0)),
+                Some(semver::Version::new(1, 0, 0)), // duplicate
+            ]
+            .into_iter(),
+        );
+        assert_eq!(versions.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_stable_versions_filters_prerelease() {
+        let pre = semver::Version::parse("1.0.0-alpha.1").unwrap();
+        let stable = semver::Version::new(1, 0, 0);
+        let versions = collect_stable_versions(vec![Some(pre), Some(stable.clone())].into_iter());
+        assert_eq!(versions, vec![stable]);
     }
 
     /// Dummy provider to verify the trait is implementable.
@@ -201,22 +306,17 @@ mod tests {
         }
 
         fn env_vars(&self, install_dir: &std::path::Path) -> HashMap<String, String> {
-            let mut vars = HashMap::new();
-            vars.insert(
+            HashMap::from([(
                 "DUMMY_HOME".to_string(),
                 install_dir.to_string_lossy().to_string(),
-            );
-            vars
+            )])
         }
     }
 
     #[test]
     fn test_dummy_provider_implements_trait() {
         let provider = DummyProvider;
-        let target = Target {
-            platform: Platform::MacOS,
-            arch: Arch::Aarch64,
-        };
+        let target = Target::new(Platform::MacOS, Arch::Aarch64);
         let spec = VersionSpec::Latest;
 
         assert_eq!(provider.name(), "dummy");

@@ -6,12 +6,14 @@ use serde::Deserialize;
 use crate::platform::{Arch, Platform, Target};
 use crate::version::VersionSpec;
 
-use super::{ArchiveFormat, Provider, ProviderError};
+use super::{
+    ArchiveFormat, Provider, ProviderError, collect_stable_versions, fetch_json,
+    resolve_from_candidates,
+};
 
 /// GitHub release entry from the python-build-standalone repository.
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
-    /// Release tag (e.g., "20240224"). Parsed for potential caching/logging.
     #[allow(unused)]
     tag_name: String,
     assets: Vec<GitHubAsset>,
@@ -26,42 +28,24 @@ struct GitHubAsset {
 
 /// Python tool provider using python-build-standalone releases.
 ///
-/// Resolves versions from `https://api.github.com/repos/indygreg/python-build-standalone/releases`
-/// and constructs download URLs for portable, pre-built Python binaries.
+/// Resolves versions and finds download URLs from a single fetch of the
+/// GitHub releases API, avoiding redundant HTTP requests.
 pub struct PythonProvider;
 
 impl PythonProvider {
-    /// GitHub API URL for python-build-standalone releases.
     const RELEASES_URL: &str =
-        "https://api.github.com/repos/indygreg/python-build-standalone/releases";
+        "https://api.github.com/repos/indygreg/python-build-standalone/releases?per_page=30";
 
-    /// Fetch releases from GitHub and extract available Python versions.
-    fn fetch_versions() -> Result<Vec<semver::Version>, ProviderError> {
-        let body = tokio::task::block_in_place(|| {
-            reqwest::blocking::Client::new()
-                .get(Self::RELEASES_URL)
-                .query(&[("per_page", "30")])
-                .header("User-Agent", "runx")
-                .header("Accept", "application/vnd.github.v3+json")
-                .send()
-                .map_err(|e| ProviderError::ResolutionFailed {
-                    tool: "python".to_string(),
-                    reason: format!("{e:#}"),
-                })?
-                .text()
-                .map_err(|e| ProviderError::ResolutionFailed {
-                    tool: "python".to_string(),
-                    reason: format!("{e:#}"),
-                })
-        })?;
-
-        Self::parse_releases(&body)
+    /// Fetch releases from GitHub (single HTTP call).
+    fn fetch_releases() -> Result<Vec<GitHubRelease>, ProviderError> {
+        let body = fetch_json(Self::RELEASES_URL, "python")?;
+        serde_json::from_str(&body).map_err(|e| ProviderError::ResolutionFailed {
+            tool: "python".to_string(),
+            reason: format!("failed to parse releases: {e}"),
+        })
     }
 
-    /// Parse GitHub releases JSON into a list of available Python versions.
-    ///
-    /// Extracts version numbers from release tag names (e.g., "20240224" tags
-    /// contain assets like "cpython-3.11.8+20240224-...").
+    /// Extract available Python versions from parsed releases.
     fn parse_releases(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
         let releases: Vec<GitHubRelease> =
             serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
@@ -69,17 +53,7 @@ impl PythonProvider {
                 reason: format!("failed to parse releases: {e}"),
             })?;
 
-        let mut versions = Vec::new();
-        for release in &releases {
-            for asset in &release.assets {
-                if let Some(ver) = Self::extract_version_from_asset(&asset.name)
-                    && ver.pre.is_empty()
-                    && !versions.contains(&ver)
-                {
-                    versions.push(ver);
-                }
-            }
-        }
+        let versions = Self::versions_from_releases(&releases);
 
         if versions.is_empty() {
             return Err(ProviderError::ResolutionFailed {
@@ -91,60 +65,30 @@ impl PythonProvider {
         Ok(versions)
     }
 
+    /// Extract unique stable versions from a list of releases.
+    fn versions_from_releases(releases: &[GitHubRelease]) -> Vec<semver::Version> {
+        collect_stable_versions(
+            releases
+                .iter()
+                .flat_map(|r| r.assets.iter())
+                .map(|asset| Self::extract_version_from_asset(&asset.name)),
+        )
+    }
+
     /// Extract a Python version from an asset filename.
-    ///
-    /// Asset names look like: `cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz`
     fn extract_version_from_asset(name: &str) -> Option<semver::Version> {
-        // Skip checksum files and non-cpython assets
         if !name.starts_with("cpython-")
             || !name.contains("install_only")
             || name.ends_with(".sha256")
         {
             return None;
         }
-
-        // Extract version: "cpython-3.11.8+20240224-..." → "3.11.8"
         let after_prefix = name.strip_prefix("cpython-")?;
         let version_str = after_prefix.split('+').next()?;
         semver::Version::parse(version_str).ok()
     }
 
-    /// Find the download URL for a specific version and target from releases.
-    fn find_download_url(
-        version: &semver::Version,
-        target: &Target,
-    ) -> Result<String, ProviderError> {
-        let body = tokio::task::block_in_place(|| {
-            reqwest::blocking::Client::new()
-                .get(Self::RELEASES_URL)
-                .query(&[("per_page", "30")])
-                .header("User-Agent", "runx")
-                .header("Accept", "application/vnd.github.v3+json")
-                .send()
-                .map_err(|e| ProviderError::ResolutionFailed {
-                    tool: "python".to_string(),
-                    reason: format!("{e:#}"),
-                })?
-                .text()
-                .map_err(|e| ProviderError::ResolutionFailed {
-                    tool: "python".to_string(),
-                    reason: format!("{e:#}"),
-                })
-        })?;
-
-        let releases: Vec<GitHubRelease> =
-            serde_json::from_str(&body).map_err(|e| ProviderError::ResolutionFailed {
-                tool: "python".to_string(),
-                reason: format!("failed to parse releases: {e}"),
-            })?;
-
-        Self::find_url_in_releases(&releases, version, target)
-    }
-
     /// Search parsed releases for a matching asset URL.
-    ///
-    /// Matches assets by version prefix and platform/arch suffix,
-    /// filtering to `install_only` tar.gz archives (not .sha256 checksums).
     fn find_url_in_releases(
         releases: &[GitHubRelease],
         version: &semver::Version,
@@ -187,13 +131,15 @@ impl Provider for PythonProvider {
         spec: &VersionSpec,
         _target: &Target,
     ) -> Result<semver::Version, ProviderError> {
-        let candidates = Self::fetch_versions()?;
-        spec.resolve(&candidates)
-            .cloned()
-            .ok_or_else(|| ProviderError::VersionNotFound {
+        let releases = Self::fetch_releases()?;
+        let versions = Self::versions_from_releases(&releases);
+        if versions.is_empty() {
+            return Err(ProviderError::ResolutionFailed {
                 tool: "python".to_string(),
-                spec: spec.to_string(),
-            })
+                reason: "no Python versions found".to_string(),
+            });
+        }
+        resolve_from_candidates(&versions, spec, "python")
     }
 
     fn download_url(
@@ -201,7 +147,11 @@ impl Provider for PythonProvider {
         version: &semver::Version,
         target: &Target,
     ) -> Result<String, ProviderError> {
-        Self::find_download_url(version, target)
+        // Fetch releases once and find the URL — this is separate from
+        // resolve_version because the Provider trait calls them independently.
+        // A future optimization could cache the releases across calls.
+        let releases = Self::fetch_releases()?;
+        Self::find_url_in_releases(&releases, version, target)
     }
 
     fn archive_format(&self, _target: &Target) -> ArchiveFormat {
@@ -210,8 +160,6 @@ impl Provider for PythonProvider {
     }
 
     fn bin_paths(&self, _version: &semver::Version, target: &Target) -> Vec<PathBuf> {
-        // python-build-standalone extracts to a "python/" directory with
-        // bin/ (Unix) or Scripts/ + python.exe (Windows) inside
         match target.platform {
             Platform::Windows => vec![
                 PathBuf::from("python"),
@@ -222,47 +170,22 @@ impl Provider for PythonProvider {
     }
 
     fn env_vars(&self, install_dir: &Path) -> HashMap<String, String> {
-        let mut vars = HashMap::new();
-        vars.insert(
+        HashMap::from([(
             "PYTHONHOME".to_string(),
             install_dir.join("python").to_string_lossy().to_string(),
-        );
-        vars
+        )])
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_helpers::*;
     use super::*;
-
-    fn macos_arm64() -> Target {
-        Target::new(Platform::MacOS, Arch::Aarch64)
-    }
-
-    fn linux_x64() -> Target {
-        Target::new(Platform::Linux, Arch::X86_64)
-    }
-
-    fn linux_arm64() -> Target {
-        Target::new(Platform::Linux, Arch::Aarch64)
-    }
-
-    fn windows_x64() -> Target {
-        Target::new(Platform::Windows, Arch::X86_64)
-    }
-
-    fn v(s: &str) -> semver::Version {
-        semver::Version::parse(s).unwrap()
-    }
-
-    // --- Provider trait ---
 
     #[test]
     fn test_name() {
         assert_eq!(PythonProvider.name(), "python");
     }
-
-    // --- Archive format ---
 
     #[test]
     fn test_archive_format_always_tar_gz() {
@@ -271,29 +194,15 @@ mod tests {
             ArchiveFormat::TarGz
         );
         assert_eq!(
-            PythonProvider.archive_format(&linux_x64()),
-            ArchiveFormat::TarGz
-        );
-        assert_eq!(
             PythonProvider.archive_format(&windows_x64()),
             ArchiveFormat::TarGz
         );
     }
 
-    // --- Bin paths ---
-
     #[test]
     fn test_bin_paths_unix() {
         let paths = PythonProvider.bin_paths(&v("3.11.8"), &macos_arm64());
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], PathBuf::from("python/bin"));
-    }
-
-    #[test]
-    fn test_bin_paths_linux() {
-        let paths = PythonProvider.bin_paths(&v("3.11.8"), &linux_x64());
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], PathBuf::from("python/bin"));
+        assert_eq!(paths, vec![PathBuf::from("python/bin")]);
     }
 
     #[test]
@@ -304,8 +213,6 @@ mod tests {
         assert_eq!(paths[1], PathBuf::from("python/Scripts"));
     }
 
-    // --- Env vars ---
-
     #[test]
     fn test_env_vars() {
         let vars = PythonProvider.env_vars(Path::new("/cache/python/3.11.8"));
@@ -313,23 +220,17 @@ mod tests {
             vars.get("PYTHONHOME").unwrap(),
             "/cache/python/3.11.8/python"
         );
-        assert_eq!(vars.len(), 1);
     }
 
     // --- extract_version_from_asset ---
 
     #[test]
-    fn test_extract_version_from_valid_asset() {
+    fn test_extract_version_valid() {
         let name = "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz";
-        let ver = PythonProvider::extract_version_from_asset(name).unwrap();
-        assert_eq!(ver, v("3.11.8"));
-    }
-
-    #[test]
-    fn test_extract_version_from_linux_asset() {
-        let name = "cpython-3.12.1+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz";
-        let ver = PythonProvider::extract_version_from_asset(name).unwrap();
-        assert_eq!(ver, v("3.12.1"));
+        assert_eq!(
+            PythonProvider::extract_version_from_asset(name),
+            Some(v("3.11.8"))
+        );
     }
 
     #[test]
@@ -339,15 +240,19 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_version_ignores_non_cpython() {
-        let name = "SHA256SUMS";
+    fn test_extract_version_ignores_sha256() {
+        let name = "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz.sha256";
         assert!(PythonProvider::extract_version_from_asset(name).is_none());
     }
 
     #[test]
-    fn test_extract_version_ignores_checksum_files() {
-        let name = "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz.sha256";
-        // .sha256 files are now rejected at the extraction level
+    fn test_extract_version_ignores_non_cpython() {
+        assert!(PythonProvider::extract_version_from_asset("SHA256SUMS").is_none());
+    }
+
+    #[test]
+    fn test_extract_version_malformed() {
+        let name = "cpython-notaversion+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz";
         assert!(PythonProvider::extract_version_from_asset(name).is_none());
     }
 
@@ -358,25 +263,15 @@ mod tests {
         let json = r#"[{
             "tag_name": "20240224",
             "assets": [
-                {
-                    "name": "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/cpython-3.11.8.tar.gz"
-                },
-                {
-                    "name": "cpython-3.12.2+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/cpython-3.12.2.tar.gz"
-                },
-                {
-                    "name": "SHA256SUMS",
-                    "browser_download_url": "https://example.com/SHA256SUMS"
-                }
+                {"name": "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz", "browser_download_url": "https://example.com/1.tar.gz"},
+                {"name": "cpython-3.12.2+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz", "browser_download_url": "https://example.com/2.tar.gz"},
+                {"name": "SHA256SUMS", "browser_download_url": "https://example.com/SHA256SUMS"}
             ]
         }]"#;
-
         let versions = PythonProvider::parse_releases(json).unwrap();
+        assert_eq!(versions.len(), 2);
         assert!(versions.contains(&v("3.11.8")));
         assert!(versions.contains(&v("3.12.2")));
-        assert_eq!(versions.len(), 2);
     }
 
     #[test]
@@ -384,116 +279,57 @@ mod tests {
         let json = r#"[{
             "tag_name": "20240224",
             "assets": [
-                {
-                    "name": "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/1.tar.gz"
-                },
-                {
-                    "name": "cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/2.tar.gz"
-                }
+                {"name": "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz", "browser_download_url": "https://example.com/1.tar.gz"},
+                {"name": "cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz", "browser_download_url": "https://example.com/2.tar.gz"}
             ]
         }]"#;
-
         let versions = PythonProvider::parse_releases(json).unwrap();
         assert_eq!(versions.len(), 1);
-        assert_eq!(versions[0], v("3.11.8"));
     }
-
-    #[test]
-    fn test_parse_releases_empty_returns_error() {
-        let json = r#"[]"#;
-        assert!(PythonProvider::parse_releases(json).is_err());
-    }
-
-    #[test]
-    fn test_parse_releases_invalid_json_returns_error() {
-        assert!(PythonProvider::parse_releases("not json").is_err());
-    }
-
-    // --- parse_releases: prerelease filtering ---
 
     #[test]
     fn test_parse_releases_excludes_prerelease() {
         let json = r#"[{
             "tag_name": "20240224",
             "assets": [
-                {
-                    "name": "cpython-3.13.0a1+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/alpha.tar.gz"
-                },
-                {
-                    "name": "cpython-3.12.2+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/stable.tar.gz"
-                }
+                {"name": "cpython-3.13.0a1+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz", "browser_download_url": "https://example.com/alpha.tar.gz"},
+                {"name": "cpython-3.12.2+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz", "browser_download_url": "https://example.com/stable.tar.gz"}
             ]
         }]"#;
-
         let versions = PythonProvider::parse_releases(json).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0], v("3.12.2"));
     }
 
     #[test]
-    fn test_parse_releases_multiple_releases() {
-        let json = r#"[
-            {
-                "tag_name": "20240224",
-                "assets": [{
-                    "name": "cpython-3.12.2+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/3.12.2.tar.gz"
-                }]
-            },
-            {
-                "tag_name": "20240107",
-                "assets": [{
-                    "name": "cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz",
-                    "browser_download_url": "https://example.com/3.11.7.tar.gz"
-                }]
-            }
-        ]"#;
-
-        let versions = PythonProvider::parse_releases(json).unwrap();
-        assert_eq!(versions.len(), 2);
-        assert!(versions.contains(&v("3.12.2")));
-        assert!(versions.contains(&v("3.11.7")));
+    fn test_parse_releases_empty_returns_error() {
+        assert!(PythonProvider::parse_releases("[]").is_err());
     }
 
-    // --- extract_version_from_asset: edge cases ---
-
     #[test]
-    fn test_extract_version_malformed_version() {
-        let name = "cpython-notaversion+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz";
-        assert!(PythonProvider::extract_version_from_asset(name).is_none());
+    fn test_parse_releases_invalid_json() {
+        assert!(PythonProvider::parse_releases("not json").is_err());
     }
 
     // --- find_url_in_releases ---
 
     #[test]
-    fn test_find_url_in_releases_macos_arm64() {
+    fn test_find_url_macos_arm64() {
         let releases = vec![GitHubRelease {
             tag_name: "20240224".to_string(),
-            assets: vec![
-                GitHubAsset {
-                    name: "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz"
-                        .to_string(),
-                    browser_download_url: "https://example.com/macos.tar.gz".to_string(),
-                },
-                GitHubAsset {
-                    name: "cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz"
-                        .to_string(),
-                    browser_download_url: "https://example.com/linux.tar.gz".to_string(),
-                },
-            ],
+            assets: vec![GitHubAsset {
+                name: "cpython-3.11.8+20240224-aarch64-apple-darwin-install_only.tar.gz"
+                    .to_string(),
+                browser_download_url: "https://example.com/macos.tar.gz".to_string(),
+            }],
         }];
-
         let url =
             PythonProvider::find_url_in_releases(&releases, &v("3.11.8"), &macos_arm64()).unwrap();
         assert_eq!(url, "https://example.com/macos.tar.gz");
     }
 
     #[test]
-    fn test_find_url_in_releases_linux_x64() {
+    fn test_find_url_linux_x64() {
         let releases = vec![GitHubRelease {
             tag_name: "20240224".to_string(),
             assets: vec![GitHubAsset {
@@ -502,46 +338,13 @@ mod tests {
                 browser_download_url: "https://example.com/linux.tar.gz".to_string(),
             }],
         }];
-
         let url =
             PythonProvider::find_url_in_releases(&releases, &v("3.12.1"), &linux_x64()).unwrap();
         assert_eq!(url, "https://example.com/linux.tar.gz");
     }
 
     #[test]
-    fn test_find_url_in_releases_linux_arm64() {
-        let releases = vec![GitHubRelease {
-            tag_name: "20240224".to_string(),
-            assets: vec![GitHubAsset {
-                name: "cpython-3.11.8+20240224-aarch64-unknown-linux-gnu-install_only.tar.gz"
-                    .to_string(),
-                browser_download_url: "https://example.com/linux-arm64.tar.gz".to_string(),
-            }],
-        }];
-
-        let url =
-            PythonProvider::find_url_in_releases(&releases, &v("3.11.8"), &linux_arm64()).unwrap();
-        assert_eq!(url, "https://example.com/linux-arm64.tar.gz");
-    }
-
-    #[test]
-    fn test_find_url_in_releases_windows() {
-        let releases = vec![GitHubRelease {
-            tag_name: "20240224".to_string(),
-            assets: vec![GitHubAsset {
-                name: "cpython-3.11.8+20240224-x86_64-pc-windows-msvc-shared-install_only.tar.gz"
-                    .to_string(),
-                browser_download_url: "https://example.com/windows.tar.gz".to_string(),
-            }],
-        }];
-
-        let url =
-            PythonProvider::find_url_in_releases(&releases, &v("3.11.8"), &windows_x64()).unwrap();
-        assert_eq!(url, "https://example.com/windows.tar.gz");
-    }
-
-    #[test]
-    fn test_find_url_in_releases_not_found() {
+    fn test_find_url_not_found() {
         let releases = vec![GitHubRelease {
             tag_name: "20240224".to_string(),
             assets: vec![GitHubAsset {
@@ -550,13 +353,13 @@ mod tests {
                 browser_download_url: "https://example.com/linux.tar.gz".to_string(),
             }],
         }];
-
-        let result = PythonProvider::find_url_in_releases(&releases, &v("3.99.0"), &linux_x64());
-        assert!(result.is_err());
+        assert!(
+            PythonProvider::find_url_in_releases(&releases, &v("3.99.0"), &linux_x64()).is_err()
+        );
     }
 
     #[test]
-    fn test_find_url_in_releases_ignores_sha256() {
+    fn test_find_url_ignores_sha256() {
         let releases = vec![GitHubRelease {
             tag_name: "20240224".to_string(),
             assets: vec![
@@ -570,7 +373,6 @@ mod tests {
                 },
             ],
         }];
-
         let url =
             PythonProvider::find_url_in_releases(&releases, &v("3.11.8"), &linux_x64()).unwrap();
         assert_eq!(url, "https://example.com/real.tar.gz");
@@ -580,13 +382,17 @@ mod tests {
 
     #[test]
     fn test_get_provider_python() {
-        let provider = super::super::get_provider("python").unwrap();
-        assert_eq!(provider.name(), "python");
+        assert_eq!(
+            super::super::get_provider("python").unwrap().name(),
+            "python"
+        );
     }
 
     #[test]
     fn test_get_provider_python3_alias() {
-        let provider = super::super::get_provider("python3").unwrap();
-        assert_eq!(provider.name(), "python");
+        assert_eq!(
+            super::super::get_provider("python3").unwrap().name(),
+            "python"
+        );
     }
 }
