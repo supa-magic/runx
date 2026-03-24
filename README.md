@@ -109,9 +109,11 @@ Scaffold a new config file with `runx init`.
 runx list                          # Show all supported tools with aliases and cache status
 runx list --cached                 # Show cached tool versions with disk sizes
 runx list node                     # Query upstream for available versions of a tool
-runx clean                         # Remove all cached binaries
+runx clean                         # Remove all cached binaries (with confirmation)
+runx clean -y                      # Skip confirmation prompt
 runx clean --tool node             # Remove only Node.js caches
 runx clean --older-than 30d        # Remove caches older than 30 days
+runx --dry-run clean               # Show what would be deleted without deleting
 runx init                          # Scaffold a .runxrc config file
 ```
 
@@ -142,6 +144,7 @@ With `--inherit-env`, the full user environment is kept and tool paths are prepe
 ```
 src/
   main.rs          Entry point (tokio async)
+  clean.rs         Cache cleanup with filtering and disk space reporting
   cli.rs           CLI parsing (clap derive)
   config.rs        .runxrc TOML config file discovery and parsing
   run.rs           Orchestration: resolve -> download -> env -> execute

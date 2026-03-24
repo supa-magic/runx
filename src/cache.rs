@@ -13,7 +13,6 @@ pub struct Cache {
     root: PathBuf,
 }
 
-#[allow(dead_code)] // with_root, prepare_install_dir, clean_tool, clean_all used by tests + upcoming clean subcommand
 impl Cache {
     /// Create a new cache rooted at `~/.runx/cache/`.
     pub fn new() -> Result<Self, CacheError> {
@@ -23,6 +22,7 @@ impl Cache {
     }
 
     /// Create a cache rooted at a custom directory (for testing).
+    #[cfg(test)]
     pub fn with_root(root: PathBuf) -> Self {
         Self { root }
     }
@@ -50,6 +50,7 @@ impl Cache {
     /// Ensure the cache directory for a tool version exists.
     ///
     /// Returns the path to the install directory.
+    #[cfg(test)]
     pub fn prepare_install_dir(
         &self,
         tool: &str,
@@ -89,6 +90,124 @@ impl Cache {
             source: e,
         })?;
         Ok(size)
+    }
+
+    /// Find cached versions older than `max_age_days` days.
+    ///
+    /// Returns candidates with their filesystem paths for optional deletion.
+    pub fn find_older_than(
+        &self,
+        max_age_days: u64,
+        tool_filter: Option<&str>,
+    ) -> Result<CleanCandidates, CacheError> {
+        let mut candidates = CleanCandidates::default();
+        if !self.root.exists() {
+            return Ok(candidates);
+        }
+
+        let cutoff = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(max_age_days * 24 * 60 * 60);
+
+        let tool_dirs = self.tool_dirs(tool_filter)?;
+
+        for (tool_name, tool_dir) in &tool_dirs {
+            let version_entries = std::fs::read_dir(tool_dir).map_err(|e| CacheError::Io {
+                path: tool_dir.clone(),
+                source: e,
+            })?;
+
+            for entry in version_entries {
+                let entry = entry.map_err(|e| CacheError::Io {
+                    path: tool_dir.clone(),
+                    source: e,
+                })?;
+                if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+
+                let modified = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+                if modified < cutoff {
+                    let path = entry.path();
+                    let version_name = entry.file_name().to_string_lossy().to_string();
+                    let size = dir_size(&path);
+                    candidates.total_bytes += size;
+                    candidates.entries.push(CleanEntry {
+                        label: format!("{tool_name}@{version_name}"),
+                        path,
+                        size,
+                    });
+                }
+            }
+        }
+
+        Ok(candidates)
+    }
+
+    /// Remove the given clean candidates from disk.
+    pub fn remove_candidates(&self, candidates: &CleanCandidates) -> Result<u64, CacheError> {
+        let mut freed = 0;
+        for entry in &candidates.entries {
+            if entry.path.exists() {
+                std::fs::remove_dir_all(&entry.path).map_err(|e| CacheError::Io {
+                    path: entry.path.clone(),
+                    source: e,
+                })?;
+                freed += entry.size;
+            }
+        }
+
+        // Clean up empty tool directories
+        if self.root.exists()
+            && let Ok(tool_entries) = std::fs::read_dir(&self.root)
+        {
+            for tool_entry in tool_entries.flatten() {
+                if tool_entry
+                    .file_type()
+                    .map(|ft| ft.is_dir())
+                    .unwrap_or(false)
+                    && std::fs::read_dir(tool_entry.path())
+                        .map(|mut d| d.next().is_none())
+                        .unwrap_or(false)
+                {
+                    let _ = std::fs::remove_dir(tool_entry.path());
+                }
+            }
+        }
+
+        Ok(freed)
+    }
+
+    /// Collect tool directories, optionally filtered to a single tool.
+    fn tool_dirs(&self, tool_filter: Option<&str>) -> Result<Vec<(String, PathBuf)>, CacheError> {
+        if let Some(name) = tool_filter {
+            let dir = self.root.join(name);
+            if dir.exists() {
+                Ok(vec![(name.to_string(), dir)])
+            } else {
+                Ok(Vec::new())
+            }
+        } else {
+            let mut dirs = Vec::new();
+            let entries = std::fs::read_dir(&self.root).map_err(|e| CacheError::Io {
+                path: self.root.clone(),
+                source: e,
+            })?;
+            for entry in entries {
+                let entry = entry.map_err(|e| CacheError::Io {
+                    path: self.root.clone(),
+                    source: e,
+                })?;
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    dirs.push((name, entry.path()));
+                }
+            }
+            Ok(dirs)
+        }
     }
 
     /// List all cached tools and their versions.
@@ -154,6 +273,26 @@ pub struct CachedTool {
     pub name: String,
     pub versions: Vec<String>,
     pub size_bytes: u64,
+}
+
+/// Candidates identified for cache cleanup.
+#[derive(Debug, Clone, Default)]
+pub struct CleanCandidates {
+    /// Total bytes of all candidates.
+    pub total_bytes: u64,
+    /// Individual entries to clean.
+    pub entries: Vec<CleanEntry>,
+}
+
+/// A single cache entry that can be cleaned.
+#[derive(Debug, Clone)]
+pub struct CleanEntry {
+    /// Display label (e.g., "node@18.0.0").
+    pub label: String,
+    /// Filesystem path to the version directory.
+    pub path: PathBuf,
+    /// Size in bytes.
+    pub size: u64,
 }
 
 /// Errors that occur during cache operations.

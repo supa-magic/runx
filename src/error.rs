@@ -54,4 +54,8 @@ pub enum RunxError {
     /// Failed to determine the current working directory.
     #[error("cannot determine current directory: {0}")]
     NoCwd(std::io::Error),
+
+    /// An I/O error during interactive prompting.
+    #[error("I/O error: {0}")]
+    Io(std::io::Error),
 }

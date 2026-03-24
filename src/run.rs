@@ -17,8 +17,12 @@ use crate::version::VersionSpec;
 /// Dispatch CLI arguments to the appropriate subcommand handler.
 pub async fn run(cli: Cli) -> Result<(), RunxError> {
     match cli.command {
-        Some(Command::Clean { tool, older_than }) => {
-            println!("clean: tool={tool:?}, older_than={older_than:?}");
+        Some(Command::Clean {
+            tool,
+            older_than,
+            yes,
+        }) => {
+            crate::clean::run(tool, older_than, yes, cli.dry_run)?;
         }
         Some(Command::List { cached, tool }) => {
             crate::list::run(cached, tool).await?;

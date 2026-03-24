@@ -135,6 +135,10 @@ pub enum Command {
         /// Remove caches older than this duration (e.g. 30d, 7d)
         #[arg(long, value_name = "DURATION")]
         older_than: Option<HumanDuration>,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// List available tools and cached versions
