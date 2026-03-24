@@ -1,4 +1,5 @@
 mod cache;
+mod clean;
 mod cli;
 mod config;
 mod download;
@@ -121,21 +122,33 @@ mod tests {
     fn test_parse_clean_with_args() {
         let cli = Cli::try_parse_from(["runx", "clean", "--tool", "node", "--older-than", "30d"])
             .unwrap();
-        let Some(Command::Clean { tool, older_than }) = cli.command else {
+        let Some(Command::Clean {
+            tool,
+            older_than,
+            yes,
+        }) = cli.command
+        else {
             panic!("expected Clean subcommand");
         };
         assert_eq!(tool.unwrap().name, "node");
         assert_eq!(older_than.unwrap().days, 30);
+        assert!(!yes);
     }
 
     #[test]
     fn test_parse_clean_no_args() {
         let cli = Cli::try_parse_from(["runx", "clean"]).unwrap();
-        let Some(Command::Clean { tool, older_than }) = cli.command else {
+        let Some(Command::Clean {
+            tool,
+            older_than,
+            yes,
+        }) = cli.command
+        else {
             panic!("expected Clean subcommand");
         };
         assert!(tool.is_none());
         assert!(older_than.is_none());
+        assert!(!yes);
     }
 
     #[test]

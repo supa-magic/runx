@@ -194,7 +194,7 @@ fn fetch_available_versions(
 }
 
 /// Format a byte count as a human-readable size string.
-fn format_size(bytes: u64) -> String {
+pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
     const GB: u64 = 1024 * MB;
