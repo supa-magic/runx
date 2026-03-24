@@ -146,6 +146,21 @@ impl Target {
         format!("{name}{}", self.platform.exe_suffix())
     }
 
+    /// Return the Rust-style target triple (e.g., `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
+    ///
+    /// Used by plugins that need platform-specific download URLs in the
+    /// standard `{arch}-{vendor}-{os}` format.
+    pub fn triple(&self) -> &'static str {
+        match (&self.platform, &self.arch) {
+            (Platform::MacOS, Arch::Aarch64) => "aarch64-apple-darwin",
+            (Platform::MacOS, Arch::X86_64) => "x86_64-apple-darwin",
+            (Platform::Linux, Arch::X86_64) => "x86_64-unknown-linux-gnu",
+            (Platform::Linux, Arch::Aarch64) => "aarch64-unknown-linux-gnu",
+            (Platform::Windows, Arch::X86_64) => "x86_64-pc-windows-msvc",
+            (Platform::Windows, Arch::Aarch64) => "aarch64-pc-windows-msvc",
+        }
+    }
+
     /// Return the cache directory name for this target.
     ///
     /// Example: `"darwin-arm64"` for macOS aarch64.

@@ -72,10 +72,22 @@ fn default_bin_path() -> String {
 
 impl PluginManifest {
     /// Expand placeholders in a template string.
+    /// Expand placeholders in a template string.
+    ///
+    /// Available placeholders:
+    /// - `{version}` — exact semver (e.g., `1.84.0`)
+    /// - `{triple}` — Rust-style target triple (e.g., `aarch64-apple-darwin`)
+    /// - `{os}` — platform name lowercase (e.g., `macos`, `linux`, `windows`)
+    /// - `{os_alt}` — download-style platform (e.g., `darwin`, `linux`, `win`)
+    /// - `{arch}` — full arch name (e.g., `aarch64`, `x86_64`)
+    /// - `{arch_alt}` — short arch name (e.g., `arm64`, `x64`)
     fn expand(&self, template: &str, version: &semver::Version, target: &Target) -> String {
         template
             .replace("{version}", &version.to_string())
+            .replace("{triple}", target.triple())
+            .replace("{os_alt}", target.platform.as_download_str())
             .replace("{os}", &target.platform.to_string().to_lowercase())
+            .replace("{arch_alt}", target.arch.as_download_str())
             .replace("{arch}", &target.arch.to_string())
     }
 
