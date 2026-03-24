@@ -1,0 +1,12 @@
+/target
+.spmrc.yml
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Docs
+docs/prds/
