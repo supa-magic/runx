@@ -152,6 +152,28 @@ runx --with rust -- cargo init hello && cd hello && cargo run
 </details>
 
 <details>
+<summary><b>AI / ML</b> — Python + Node for AI development</summary>
+
+```bash
+# OpenAI / Anthropic SDK
+runx --with python@3.12 -- pip install anthropic && python3 agent.py
+
+# LangChain + FastAPI
+runx --with python@3.12 -- pip install langchain fastapi uvicorn && uvicorn api:app
+
+# Hugging Face transformers
+runx --with python@3.11 -- pip install torch transformers && python3 train.py
+
+# Node.js AI SDK (Vercel AI)
+runx --with node -- npx create-ai-app my-ai-app
+
+# Full-stack AI: Python backend + Node frontend
+runx --with python@3.12 --with node@22 -- ./start-ai-app.sh
+```
+
+</details>
+
+<details>
 <summary><b>Multiple runtimes</b> — download in parallel</summary>
 
 ```bash
@@ -257,9 +279,14 @@ tools = ["java@21"]
 ```
 
 ```toml
+# AI / ML project
+tools = ["python@3.12", "node@22"]
+inherit_env = true  # pass through API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY)
+```
+
+```toml
 # Monorepo
 tools = ["node@22", "python@3.12", "go@1"]
-inherit_env = true
 ```
 
 </details>
@@ -293,6 +320,61 @@ jobs:
 ```
 
 With a `.runxrc.lock`, CI downloads the exact same binaries every run — no version drift.
+
+### Docker
+
+Replace complex multi-stage builds with a single `COPY`:
+
+```dockerfile
+# Before: 20+ lines of apt-get, curl, nvm, pyenv...
+# After:
+FROM ubuntu:24.04
+COPY --from=runx /runx /usr/local/bin/runx
+RUN runx --with node@22 -- npm ci
+RUN runx --with node@22 -- npm run build
+CMD ["runx", "--with", "node@22", "--", "node", "server.js"]
+```
+
+<details>
+<summary><b>Full example: multi-runtime Docker build</b></summary>
+
+```dockerfile
+FROM ubuntu:24.04
+
+# One binary — all runtimes
+COPY runx /usr/local/bin/runx
+
+# Frontend
+RUN runx --with node@22 -- npm ci --prefix frontend
+RUN runx --with node@22 -- npm run build --prefix frontend
+
+# Backend
+RUN runx --with python@3.12 -- pip install -r requirements.txt
+
+# No nvm, no pyenv, no apt-get install nodejs python3
+CMD ["runx", "--with", "python@3.12", "--", "uvicorn", "main:app", "--host", "0.0.0.0"]
+```
+
+Compare to the traditional approach:
+
+```dockerfile
+# Traditional: 40+ lines
+FROM node:22-slim AS frontend
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y ...
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY --from=frontend /app/frontend/dist ./static
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0"]
+```
+
+</details>
 
 ---
 
@@ -337,6 +419,36 @@ for col in rows[0]:
         print(f"{col}: mean={statistics.mean(vals):.2f}, median={statistics.median(vals):.2f}")
     except ValueError:
         print(f"{col}: {len(set(r[col] for r in rows))} unique values")
+```
+
+</details>
+
+<details>
+<summary><b>ask.py</b> — CLI AI assistant (uses Anthropic API)</summary>
+
+```python
+#!/usr/bin/env -S runx --with python@3.12 --inherit-env --
+# ask.py — ask Claude from the command line
+# Usage: ./ask.py "explain this error" < traceback.txt
+
+import sys
+try:
+    import anthropic
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "anthropic", "-q"])
+    import anthropic
+
+prompt = sys.argv[1] if len(sys.argv) > 1 else "Summarize this input"
+stdin = sys.stdin.read() if not sys.stdin.isatty() else ""
+
+client = anthropic.Anthropic()  # uses ANTHROPIC_API_KEY from env
+msg = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": f"{prompt}\n\n{stdin}".strip()}],
+)
+print(msg.content[0].text)
 ```
 
 </details>
