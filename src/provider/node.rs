@@ -47,18 +47,23 @@ impl NodeProvider {
                 })
         })?;
 
+        Self::parse_versions(&body)
+    }
+
+    /// Parse the Node.js version index JSON into a list of stable semver versions.
+    ///
+    /// Filters out pre-release versions and strips the `v` prefix from version strings.
+    fn parse_versions(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
         let entries: Vec<NodeVersion> =
-            serde_json::from_str(&body).map_err(|e| ProviderError::ResolutionFailed {
+            serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
                 tool: "node".to_string(),
                 reason: format!("failed to parse version index: {e}"),
             })?;
 
         let mut versions = Vec::new();
         for entry in &entries {
-            // Strip leading "v" prefix
             let ver_str = entry.version.strip_prefix('v').unwrap_or(&entry.version);
             if let Ok(v) = semver::Version::parse(ver_str) {
-                // Only include stable releases (no pre-release)
                 if v.pre.is_empty() {
                     versions.push(v);
                 }
@@ -287,5 +292,106 @@ mod tests {
             NodeProvider::archive_dir_name(&v("18.19.1"), &windows_x64()),
             "node-v18.19.1-win-x64"
         );
+    }
+
+    // --- Linux arm64 target ---
+
+    fn linux_arm64() -> Target {
+        Target::new(Platform::Linux, Arch::Aarch64)
+    }
+
+    #[test]
+    fn test_download_url_linux_arm64() {
+        let url = NodeProvider
+            .download_url(&v("20.11.0"), &linux_arm64())
+            .unwrap();
+        assert_eq!(
+            url,
+            "https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-arm64.tar.gz"
+        );
+    }
+
+    #[test]
+    fn test_bin_paths_linux_arm64() {
+        let paths = NodeProvider.bin_paths(&v("20.11.0"), &linux_arm64());
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], PathBuf::from("node-v20.11.0-linux-arm64/bin"));
+    }
+
+    // --- parse_versions ---
+
+    #[test]
+    fn test_parse_versions_basic() {
+        let json = r#"[
+            {"version": "v20.11.0", "lts": "Iron"},
+            {"version": "v18.19.1", "lts": "Hydrogen"},
+            {"version": "v21.6.1", "lts": false}
+        ]"#;
+        let versions = NodeProvider::parse_versions(json).unwrap();
+        assert_eq!(versions.len(), 3);
+        assert!(versions.contains(&v("20.11.0")));
+        assert!(versions.contains(&v("18.19.1")));
+        assert!(versions.contains(&v("21.6.1")));
+    }
+
+    #[test]
+    fn test_parse_versions_filters_prerelease() {
+        let json = r#"[
+            {"version": "v20.0.0", "lts": false},
+            {"version": "v20.0.0-rc.1", "lts": false}
+        ]"#;
+        let versions = NodeProvider::parse_versions(json).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0], v("20.0.0"));
+    }
+
+    #[test]
+    fn test_parse_versions_empty_returns_error() {
+        let json = r#"[]"#;
+        let result = NodeProvider::parse_versions(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_versions_invalid_json_returns_error() {
+        let result = NodeProvider::parse_versions("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_versions_strips_v_prefix() {
+        let json = r#"[{"version": "v18.0.0", "lts": false}]"#;
+        let versions = NodeProvider::parse_versions(json).unwrap();
+        assert_eq!(versions[0], v("18.0.0"));
+    }
+
+    #[test]
+    fn test_parse_versions_skips_unparseable() {
+        let json = r#"[
+            {"version": "v18.0.0", "lts": false},
+            {"version": "not-a-version", "lts": false}
+        ]"#;
+        let versions = NodeProvider::parse_versions(json).unwrap();
+        assert_eq!(versions.len(), 1);
+    }
+
+    // --- get_provider ---
+
+    #[test]
+    fn test_get_provider_node() {
+        let provider = super::super::get_provider("node").unwrap();
+        assert_eq!(provider.name(), "node");
+    }
+
+    #[test]
+    fn test_get_provider_nodejs_alias() {
+        let provider = super::super::get_provider("nodejs").unwrap();
+        assert_eq!(provider.name(), "node");
+    }
+
+    #[test]
+    fn test_get_provider_unknown() {
+        let result = super::super::get_provider("unknown");
+        assert!(result.is_err());
     }
 }
