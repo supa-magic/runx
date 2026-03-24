@@ -108,9 +108,13 @@ impl Provider for BunProvider {
     }
 
     fn bin_paths(&self, _version: &semver::Version, target: &Target) -> Vec<PathBuf> {
-        // Bun zip extracts to a directory like bun-darwin-aarch64/ containing bun and bunx
-        let bun_target = Self::bun_target(target).unwrap_or("bun");
-        vec![PathBuf::from(format!("bun-{bun_target}"))]
+        // Bun zip extracts to a directory like bun-darwin-aarch64/ containing bun and bunx.
+        // If the target is unsupported, download_url will fail before bin_paths is called,
+        // but we handle it gracefully here by returning the base "bun" directory.
+        match Self::bun_target(target) {
+            Ok(t) => vec![PathBuf::from(format!("bun-{t}"))],
+            Err(_) => vec![PathBuf::from("bun")],
+        }
     }
 
     fn env_vars(&self, install_dir: &Path) -> HashMap<String, String> {
@@ -214,6 +218,12 @@ mod tests {
     fn test_bin_paths_macos_arm64() {
         let paths = BunProvider.bin_paths(&v("1.0.25"), &macos_arm64());
         assert_eq!(paths, vec![PathBuf::from("bun-darwin-aarch64")]);
+    }
+
+    #[test]
+    fn test_bin_paths_windows_x64() {
+        let paths = BunProvider.bin_paths(&v("1.0.25"), &windows_x64());
+        assert_eq!(paths, vec![PathBuf::from("bun-windows-x64")]);
     }
 
     #[test]
