@@ -48,7 +48,7 @@ pub async fn install(tool: Option<ToolSpec>, list: bool) -> Result<(), RunxError
 
     // Check if ~/.runx/bin is in PATH
     if let Ok(path) = std::env::var("PATH")
-        && !path.split(':').any(|p| Path::new(p) == bin)
+        && !std::env::split_paths(&path).any(|p| p == bin)
     {
         eprintln!();
         eprintln!("Add ~/.runx/bin to your PATH:");
