@@ -20,27 +20,18 @@ That's it. Node 22 was downloaded, cached, and your command ran in a fully isola
 
 **runx** is a single binary that replaces nvm, pyenv, goenv, and a dozen YAML lines in your CI — for **Node.js, Python, Go, Deno, Bun, Ruby, Java, and Rust** (and [any tool via plugins](#plugins)).
 
-| Problem | Before runx | With runx |
-|---------|-------------|-----------|
-| "Works on my machine" | Everyone has different versions | `.runxrc` pins versions for the whole team |
-| Testing across versions | `nvm use 18`, test, `nvm use 22`, test | `runx --with node@18 -- npm test` |
-| CI/CD tool setup | `actions/setup-node` + `actions/setup-python` + ... | `runx --with node@22 -- npm run build` |
-| Onboarding a new dev | "Follow these 12 setup steps..." | `git clone && runx -- npm start` |
-| Trying a new runtime | Install globally, use once, forget to uninstall | `runx --with bun -- bun run index.ts` |
-| Environment pollution | `NVM_DIR`, `PYENV_ROOT` leaking everywhere | Isolated clean-room env every time |
+**Why runx?**
+
+- **"Works on my machine"** — commit a `.runxrc`, everyone gets the same versions
+- **Testing across versions** — `runx --with node@18 -- npm test`, then `node@22`, done
+- **CI/CD** — one binary, no `actions/setup-node` + `actions/setup-python` + ...
+- **Onboarding** — `git clone && runx -- npm start` instead of 12 setup steps
+- **Try anything** — `runx --with bun -- bun run index.ts`, no global install
+- **No pollution** — isolated env every time, no `NVM_DIR` or `PYENV_ROOT` leaking
 
 ---
 
 ## Examples
-
-```bash
-runx --with node -- npm test
-runx --with python -- python3 app.py
-runx --with java -- javac Main.java && java Main
-runx --with ruby -- ruby -e "puts 'hello from Ruby'"
-runx --with rust -- cargo build --release
-runx --with go -- go run main.go
-```
 
 <details>
 <summary><b>Node.js</b> — run any version without nvm</summary>
