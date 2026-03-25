@@ -11,8 +11,6 @@ Set TypingSpeed 35ms
 Set Shell "bash"
 Env PATH "/usr/local/bin:/Users/ab/.runx/bin:/opt/homebrew/bin:/usr/bin:/bin"
 Env HOME "/Users/ab"
-Env npm_config_yes "true"
-Env RUNX_NO_INTERACTIVE "true"
 
 # Install
 Type "curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh"
@@ -33,13 +31,13 @@ Type "clear"
 Enter
 Sleep 500ms
 
-# Python
-Type "runx --with python@3.12 -- python3 --version"
+# Go backend
+Type "runx --with go -- go version"
 Enter
-Sleep 8s
+Sleep 6s
 
-# Full-stack
-Type "runx --with node --with python@3.12 -- node -v"
+# Both together
+Type "runx --with node --with go -- node -v"
 Enter
 Sleep 4s
 
