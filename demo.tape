@@ -1,5 +1,5 @@
 # runx demo — https://github.com/supa-magic/runx
-# Record with: vhs demo.tape
+# Record with: runx clean -y; rm -rf my-app; vhs demo.tape
 
 Output demo.gif
 Set Theme "Dracula"
@@ -12,16 +12,7 @@ Set Shell "bash"
 Env PATH "/usr/local/bin:/Users/ab/.runx/bin:/opt/homebrew/bin:/usr/bin:/bin"
 Env HOME "/Users/ab"
 Env npm_config_yes "true"
-
-# Clean cache so downloads are visible
-Hide
-Type "runx clean -y 2>/dev/null; rm -rf my-app"
-Enter
-Sleep 2s
-Type "clear"
-Enter
-Sleep 500ms
-Show
+Env RUNX_NO_INTERACTIVE "true"
 
 # Install
 Type "curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh"
@@ -35,7 +26,7 @@ Enter
 Sleep 500ms
 
 # React + Vite
-Type "runx --with node -- npx create-vite my-app --template react"
+Type "runx --with node -- npx --yes create-vite my-app --template react"
 Enter
 Sleep 15s
 Type "clear"
@@ -48,8 +39,6 @@ Enter
 Sleep 8s
 
 # Full-stack
-Type "echo"
-Enter
 Type "runx --with node --with python@3.12 -- node -v"
 Enter
 Sleep 4s
