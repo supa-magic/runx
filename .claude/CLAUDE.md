@@ -11,7 +11,7 @@ cargo build                              # build
 cargo run                                # run
 cargo fmt --check                        # check formatting
 cargo clippy --all-targets --all-features # lint
-cargo test                               # all tests (463 passing)
+cargo test                               # all tests (497 passing)
 cargo test --doc                         # doctests only
 cargo check                              # type check without building
 ```
@@ -42,15 +42,15 @@ src/
   environment.rs       # Isolated/inherited environment construction, TempDirs RAII guard
   executor.rs          # Child process spawning, signal forwarding (SIGTERM on Unix), exit code handling
   provider/
-    mod.rs             # Provider trait, get_provider() dispatch, ProviderError, ArchiveFormat
+    mod.rs             # Provider trait, get_provider() dispatch, ProviderError, ArchiveFormat, fetch_json() with retry (3 attempts, exponential backoff, Retry-After support)
     node.rs            # Node.js provider (nodejs.org dist index)
     python.rs          # Python provider (python-build-standalone GitHub releases)
     go.rs              # Go provider (go.dev official binary distributions)
-    deno.rs            # Deno provider (GitHub releases)
+    deno.rs            # Deno provider (deno.com/versions.json)
     bun.rs             # Bun provider (GitHub releases)
     ruby.rs            # Ruby provider (ruby-builder GitHub releases)
     java.rs            # Java provider (Eclipse Adoptium/Temurin API)
-    rust.rs            # Rust provider (rust-lang GitHub releases + post-install)
+    rust.rs            # Rust provider (static.rust-lang.org channel manifest + post-install)
 docs/prds/
   runx.md              # Product requirements document
 ```
@@ -62,11 +62,11 @@ docs/prds/
 | Node.js | `node`, `nodejs` | `https://nodejs.org/dist/index.json` |
 | Python | `python`, `python3` | `https://api.github.com/repos/indygreg/python-build-standalone/releases` |
 | Go | `go`, `golang` | `https://go.dev/dl/?mode=json` |
-| Deno | `deno` | `https://api.github.com/repos/denoland/deno/releases` |
+| Deno | `deno` | `https://deno.com/versions.json` |
 | Bun | `bun`, `bunx` | `https://api.github.com/repos/oven-sh/bun/releases` |
 | Ruby | `ruby`, `rb` | `https://api.github.com/repos/ruby/ruby-builder/releases` |
 | Java | `java`, `jdk` | `https://api.adoptium.net/v3/info/available_releases` |
-| Rust | `rust`, `rustc`, `cargo` | `https://api.github.com/repos/rust-lang/rust/releases` |
+| Rust | `rust`, `rustc`, `cargo` | `https://static.rust-lang.org/dist/channel-rust-stable.toml` |
 
 ## CLI Flags
 

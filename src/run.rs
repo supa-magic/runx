@@ -15,6 +15,8 @@ use crate::provider::{self, ArchiveFormat, Provider};
 
 /// Dispatch CLI arguments to the appropriate subcommand handler.
 pub async fn run(cli: Cli) -> Result<(), RunxError> {
+    crate::provider::VERBOSE.store(cli.verbose, std::sync::atomic::Ordering::Relaxed);
+
     match cli.command {
         Some(Command::Clean {
             tool,
@@ -451,10 +453,19 @@ mod tests {
         assert!(matches!(err, RunxError::NoCommand));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_run_no_tools_returns_error() {
+        // Run from a temp dir with no .runxrc so config discovery finds nothing
+        // and merged.tools stays empty → NoTools error.
+        let tmp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
         let cli = Cli::try_parse_from(["runx", "--", "node", "-v"]).unwrap();
         let err = run(cli).await.unwrap_err();
+
+        std::env::set_current_dir(original).unwrap();
+
         assert!(matches!(err, RunxError::NoTools));
     }
 

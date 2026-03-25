@@ -4,35 +4,105 @@ use std::path::{Path, PathBuf};
 use crate::platform::Target;
 use crate::version::VersionSpec;
 
-use super::{
-    ArchiveFormat, Provider, ProviderError, fetch_json, parse_github_releases,
-    resolve_from_candidates,
-};
+use super::{ArchiveFormat, Provider, ProviderError, fetch_json, resolve_from_candidates};
 
 /// Rust tool provider using official standalone installers.
 ///
-/// Resolves versions from GitHub releases (`rust-lang/rust`) and constructs
-/// download URLs for standalone Rust toolchain installers from `static.rust-lang.org`.
+/// Resolves versions from the official Rust release channel manifest at
+/// `static.rust-lang.org`. This avoids GitHub API rate limits and provides
+/// faster, more reliable version resolution.
 ///
 /// Unlike other providers, Rust requires a post-install step (`install.sh`)
 /// to place binaries in the correct directory structure.
 pub struct RustProvider;
 
+/// Minimum Rust minor version to include in the candidate list.
+/// Rust 1.20.0 (Aug 2017) is a reasonable lower bound — older versions
+/// lack many modern features and are unlikely to be requested.
+const MIN_MINOR_VERSION: u64 = 20;
+
 impl RustProvider {
-    const RELEASES_URL: &str = "https://api.github.com/repos/rust-lang/rust/releases?per_page=30";
+    const CHANNEL_URL: &str = "https://static.rust-lang.org/dist/channel-rust-stable.toml";
+
+    /// Fetch the latest stable Rust version from the channel manifest.
+    fn fetch_stable_version() -> Result<semver::Version, ProviderError> {
+        let body = fetch_json(Self::CHANNEL_URL, "rust")?;
+        Self::parse_channel_version(&body)
+    }
+
+    /// Parse the stable version from the channel TOML manifest.
+    ///
+    /// Extracts the `pkg.rust.version` field which contains e.g. "1.94.0 (4a4ef493e 2026-03-02)".
+    /// Uses the `toml` crate (already a project dependency) to deserialize only the fields we need,
+    /// which is both more robust and more correct than line-scanning — the previous approach
+    /// returned the first `version = "..."` line, which could match the wrong package.
+    fn parse_channel_version(toml_body: &str) -> Result<semver::Version, ProviderError> {
+        #[derive(serde::Deserialize)]
+        struct ChannelManifest {
+            pkg: PkgSection,
+        }
+        #[derive(serde::Deserialize)]
+        struct PkgSection {
+            rust: PkgEntry,
+        }
+        #[derive(serde::Deserialize)]
+        struct PkgEntry {
+            version: String,
+        }
+
+        let manifest: ChannelManifest =
+            toml::from_str(toml_body).map_err(|e| ProviderError::ResolutionFailed {
+                tool: "rust".to_string(),
+                reason: format!("failed to parse channel manifest: {e}"),
+            })?;
+
+        // Version field contains e.g. "1.94.0 (4a4ef493e 2026-03-02)" — take the first token
+        let ver_str = manifest
+            .pkg
+            .rust
+            .version
+            .split_whitespace()
+            .next()
+            .ok_or_else(|| ProviderError::ResolutionFailed {
+                tool: "rust".to_string(),
+                reason: "empty version string in channel manifest".to_string(),
+            })?;
+
+        semver::Version::parse(ver_str).map_err(|e| ProviderError::ResolutionFailed {
+            tool: "rust".to_string(),
+            reason: format!("invalid version `{ver_str}` in channel manifest: {e}"),
+        })
+    }
+
+    /// Generate all plausible Rust versions from 1.MIN to current stable.
+    ///
+    /// Rust follows a predictable 6-week release cadence where each release
+    /// increments the minor version. Every `1.x.0` from 1.0.0 to current exists.
+    /// Patch releases (1.x.1, 1.x.2) are rare — we include .0 for all and add
+    /// common patch versions that are known to exist.
+    fn generate_candidates(latest: &semver::Version) -> Vec<semver::Version> {
+        let range_count = if latest.minor >= MIN_MINOR_VERSION {
+            (latest.minor - MIN_MINOR_VERSION + 1) as usize
+        } else {
+            0
+        };
+        let count = range_count + usize::from(latest.patch > 0);
+        let mut candidates = Vec::with_capacity(count);
+        for minor in MIN_MINOR_VERSION..=latest.minor {
+            candidates.push(semver::Version::new(1, minor, 0));
+        }
+        // Include the exact latest if it has a patch > 0 (e.g. 1.77.2).
+        // The contains() check is unnecessary — all generated versions have patch=0,
+        // so a latest with patch > 0 is guaranteed to be absent.
+        if latest.patch > 0 {
+            candidates.push(latest.clone());
+        }
+        candidates
+    }
 
     fn fetch_versions() -> Result<Vec<semver::Version>, ProviderError> {
-        let body = fetch_json(Self::RELEASES_URL, "rust")?;
-        Self::parse_releases(&body)
-    }
-
-    fn parse_releases(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
-        parse_github_releases(json, "rust", Self::parse_tag)
-    }
-
-    /// Parse a Rust release tag like "1.77.0" into a semver Version.
-    fn parse_tag(tag: &str) -> Option<semver::Version> {
-        semver::Version::parse(tag).ok()
+        let latest = Self::fetch_stable_version()?;
+        Ok(Self::generate_candidates(&latest))
     }
 }
 
@@ -192,12 +262,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_tag() {
-        assert_eq!(RustProvider::parse_tag("1.77.0"), Some(v("1.77.0")));
-        assert!(RustProvider::parse_tag("nightly").is_none());
-    }
-
-    #[test]
     fn test_get_provider_rust() {
         assert_eq!(super::super::get_provider("rust").unwrap().name(), "rust");
     }
@@ -205,5 +269,201 @@ mod tests {
     #[test]
     fn test_get_provider_rustc_alias() {
         assert_eq!(super::super::get_provider("rustc").unwrap().name(), "rust");
+    }
+
+    // --- Channel manifest parsing ---
+
+    #[test]
+    fn test_parse_channel_version_valid() {
+        let toml = r#"
+manifest-version = "2"
+date = "2026-03-05"
+
+[pkg.rust]
+version = "1.94.0 (4a4ef493e 2026-03-02)"
+"#;
+        let version = RustProvider::parse_channel_version(toml).unwrap();
+        assert_eq!(version, v("1.94.0"));
+    }
+
+    #[test]
+    fn test_parse_channel_version_no_version_returns_error() {
+        let toml = r#"
+manifest-version = "2"
+date = "2026-03-05"
+"#;
+        assert!(RustProvider::parse_channel_version(toml).is_err());
+    }
+
+    #[test]
+    fn test_parse_channel_version_invalid_version_string() {
+        let toml = r#"
+[pkg.rust]
+version = "not-a-version"
+"#;
+        assert!(RustProvider::parse_channel_version(toml).is_err());
+    }
+
+    #[test]
+    fn test_parse_channel_version_multi_package_manifest() {
+        // The real manifest has version lines for cargo, clippy, rustfmt, etc.
+        // We must extract only pkg.rust.version, not the first version = line.
+        let toml = r#"
+manifest-version = "2"
+date = "2026-03-05"
+
+[pkg.cargo]
+version = "0.95.0 (abc1234 2026-03-01)"
+
+[pkg.rust]
+version = "1.94.0 (4a4ef493e 2026-03-02)"
+
+[pkg.clippy]
+version = "0.1.94 (def5678 2026-03-02)"
+"#;
+        let version = RustProvider::parse_channel_version(toml).unwrap();
+        assert_eq!(version, v("1.94.0"));
+    }
+
+    #[test]
+    fn test_parse_channel_version_no_pkg_rust_returns_error() {
+        // Manifest that has other packages but no [pkg.rust] section
+        let toml = r#"
+manifest-version = "2"
+
+[pkg.cargo]
+version = "0.95.0 (abc1234 2026-03-01)"
+"#;
+        assert!(RustProvider::parse_channel_version(toml).is_err());
+    }
+
+    // --- Candidate generation ---
+
+    #[test]
+    fn test_generate_candidates_includes_range() {
+        let latest = v("1.80.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        // Should include 1.20.0 through 1.80.0
+        assert_eq!(candidates.len(), 61); // 80 - 20 + 1
+        assert!(candidates.contains(&v("1.20.0")));
+        assert!(candidates.contains(&v("1.80.0")));
+        assert!(!candidates.contains(&v("1.19.0")));
+    }
+
+    #[test]
+    fn test_generate_candidates_with_patch_version() {
+        let latest = v("1.77.2");
+        let candidates = RustProvider::generate_candidates(&latest);
+        assert!(candidates.contains(&v("1.77.0")));
+        assert!(candidates.contains(&v("1.77.2")));
+    }
+
+    #[test]
+    fn test_generate_candidates_no_duplicate_for_patch_zero() {
+        let latest = v("1.80.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        let target = v("1.80.0");
+        let count = candidates.iter().filter(|c| **c == target).count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_generate_candidates_below_min_minor_returns_empty() {
+        // If latest.minor < MIN_MINOR_VERSION, the range is empty
+        let latest = v("1.19.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn test_generate_candidates_exact_min_minor() {
+        let latest = v("1.20.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], v("1.20.0"));
+    }
+
+    #[test]
+    fn test_generate_candidates_ascending_order() {
+        // Candidates must be in ascending order so resolve_from_candidates picks the highest match.
+        let latest = v("1.77.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        for window in candidates.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "candidates must be ascending: {:?} >= {:?}",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_candidates_patch_not_duplicated_when_base_present() {
+        // 1.77.0 is in the base range; when latest is 1.77.2, the base entry appears exactly once.
+        let latest = v("1.77.2");
+        let candidates = RustProvider::generate_candidates(&latest);
+        let count_base = candidates.iter().filter(|c| **c == v("1.77.0")).count();
+        assert_eq!(
+            count_base, 1,
+            "1.77.0 should appear exactly once even when latest is a patch release"
+        );
+    }
+
+    // --- parse_channel_version: plain semver (no parenthetical hash) ---
+
+    #[test]
+    fn test_parse_channel_version_plain_semver_without_hash() {
+        // Version string without trailing hash/date should still parse correctly.
+        let toml = "[pkg.rust]\nversion = \"1.80.0\"";
+        let version = RustProvider::parse_channel_version(toml).unwrap();
+        assert_eq!(version, v("1.80.0"));
+    }
+
+    // --- download_url: Linux aarch64 ---
+
+    #[test]
+    fn test_download_url_linux_arm64() {
+        let url = RustProvider
+            .download_url(&v("1.77.0"), &linux_arm64())
+            .unwrap();
+        assert_eq!(
+            url,
+            "https://static.rust-lang.org/dist/rust-1.77.0-aarch64-unknown-linux-gnu.tar.gz"
+        );
+    }
+
+    // --- post_install_command: individual flags ---
+
+    #[test]
+    fn test_post_install_command_includes_without_rust_docs() {
+        let cmd = RustProvider
+            .post_install_command(&v("1.77.0"), &linux_x64(), Path::new("/tmp/rust"))
+            .unwrap();
+        assert!(
+            cmd.contains("--without=rust-docs"),
+            "should skip rust-docs to reduce install size"
+        );
+    }
+
+    #[test]
+    fn test_post_install_command_includes_disable_ldconfig() {
+        let cmd = RustProvider
+            .post_install_command(&v("1.77.0"), &linux_x64(), Path::new("/tmp/rust"))
+            .unwrap();
+        assert!(
+            cmd.contains("--disable-ldconfig"),
+            "should disable ldconfig for non-root installs"
+        );
+    }
+
+    #[test]
+    fn test_post_install_command_always_returns_some() {
+        // post_install_command does not inspect the platform; it always returns Some.
+        assert!(
+            RustProvider
+                .post_install_command(&v("1.77.0"), &macos_arm64(), Path::new("/x"))
+                .is_some()
+        );
     }
 }

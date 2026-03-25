@@ -9,9 +9,13 @@ pub mod rust;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::platform::Target;
 use crate::version::VersionSpec;
+
+/// Global verbose flag — set once from CLI parsing, read by `fetch_json` for retry messages.
+pub static VERBOSE: AtomicBool = AtomicBool::new(false);
 
 pub use bun::BunProvider;
 pub use deno::DenoProvider;
@@ -121,6 +125,14 @@ static HTTP_CLIENT: std::sync::LazyLock<reqwest::blocking::Client> =
 static RESPONSE_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
+/// Maximum number of retry attempts for transient HTTP errors.
+const MAX_RETRIES: u32 = 3;
+
+/// HTTP status codes considered transient and eligible for retry.
+fn is_transient_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
+}
+
 pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
     tokio::task::block_in_place(|| {
         // Check cache first (recover from poison — cached data is still valid)
@@ -131,39 +143,103 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
             }
         }
 
-        let response = HTTP_CLIENT
-            .get(url)
-            .header("User-Agent", "runx")
-            .header("Accept", "application/json")
-            .send()
-            .map_err(|e| ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("{e:#}"),
-            })?;
+        let verbose = VERBOSE.load(Ordering::Relaxed);
+        let mut last_reason = String::new();
 
-        let status = response.status();
-        if !status.is_success() {
-            return Err(ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("HTTP {status} from {url}"),
-            });
+        for attempt in 1..=MAX_RETRIES {
+            // Determine the outcome and whether it's retryable
+            let (reason, delay) = match HTTP_CLIENT
+                .get(url)
+                .header("User-Agent", "runx")
+                .header("Accept", "application/json")
+                .send()
+            {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        let body =
+                            response
+                                .text()
+                                .map_err(|e| ProviderError::ResolutionFailed {
+                                    tool: tool.to_string(),
+                                    reason: format!("{e:#}"),
+                                })?;
+
+                        // Cache the response (recover from poison)
+                        RESPONSE_CACHE
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(url.to_string(), body.clone());
+
+                        return Ok(body);
+                    }
+
+                    let delay = if is_transient_status(status) {
+                        Some(retry_delay(&response, attempt))
+                    } else {
+                        None
+                    };
+                    (format!("HTTP {status} from {url}"), delay)
+                }
+                Err(e) => {
+                    let delay = Some(std::time::Duration::from_secs(1u64 << (attempt - 1).min(6)));
+                    (format!("{e:#}"), delay)
+                }
+            };
+
+            // Non-retryable error, or final attempt — return immediately
+            let Some(delay) = delay.filter(|_| attempt < MAX_RETRIES) else {
+                return Err(ProviderError::ResolutionFailed {
+                    tool: tool.to_string(),
+                    reason,
+                });
+            };
+
+            if verbose {
+                eprintln!(
+                    "Retrying {tool} resolution (attempt {}/{MAX_RETRIES}, {reason})...",
+                    attempt + 1
+                );
+            }
+            std::thread::sleep(delay);
+            last_reason = reason;
         }
 
-        let body = response
-            .text()
-            .map_err(|e| ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("{e:#}"),
-            })?;
-
-        // Cache the response (recover from poison)
-        RESPONSE_CACHE
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(url.to_string(), body.clone());
-
-        Ok(body)
+        // Unreachable in practice (the loop always returns), but keeps the compiler happy
+        Err(ProviderError::ResolutionFailed {
+            tool: tool.to_string(),
+            reason: last_reason,
+        })
     })
+}
+
+/// Compute the retry delay, respecting `Retry-After` header for 429 responses.
+fn retry_delay(response: &reqwest::blocking::Response, attempt: u32) -> std::time::Duration {
+    let retry_after_secs = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    compute_retry_delay(response.status(), retry_after_secs, attempt)
+}
+
+/// Pure delay computation — separated so it can be unit-tested without a live HTTP response.
+///
+/// For 429 responses with a valid numeric `Retry-After` header, that value (seconds) is used.
+/// Otherwise, exponential backoff applies: attempt 1 → 1s, attempt 2 → 2s, attempt 3 → 4s,
+/// capped at 64s to prevent shift overflow on large attempt counts.
+fn compute_retry_delay(
+    status: reqwest::StatusCode,
+    retry_after_secs: Option<u64>,
+    attempt: u32,
+) -> std::time::Duration {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        && let Some(secs) = retry_after_secs
+    {
+        return std::time::Duration::from_secs(secs);
+    }
+    // Exponential backoff: 1s, 2s, 4s — capped at 64s to prevent shift overflow
+    std::time::Duration::from_secs(1u64 << (attempt - 1).min(6))
 }
 
 /// A simple GitHub release entry with just the tag name.
@@ -656,5 +732,138 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("unknown tool `zig`"));
         assert!(msg.contains("node, python, go, deno, bun, ruby, java, rust"));
+    }
+
+    // --- is_transient_status ---
+
+    #[test]
+    fn test_transient_status_codes() {
+        use reqwest::StatusCode;
+        assert!(is_transient_status(StatusCode::TOO_MANY_REQUESTS)); // 429
+        assert!(is_transient_status(StatusCode::INTERNAL_SERVER_ERROR)); // 500
+        assert!(is_transient_status(StatusCode::BAD_GATEWAY)); // 502
+        assert!(is_transient_status(StatusCode::SERVICE_UNAVAILABLE)); // 503
+        assert!(is_transient_status(StatusCode::GATEWAY_TIMEOUT)); // 504
+    }
+
+    #[test]
+    fn test_non_transient_status_codes() {
+        use reqwest::StatusCode;
+        assert!(!is_transient_status(StatusCode::BAD_REQUEST)); // 400
+        assert!(!is_transient_status(StatusCode::UNAUTHORIZED)); // 401
+        assert!(!is_transient_status(StatusCode::FORBIDDEN)); // 403
+        assert!(!is_transient_status(StatusCode::NOT_FOUND)); // 404
+        assert!(!is_transient_status(StatusCode::OK)); // 200
+    }
+
+    #[test]
+    fn test_non_transient_5xx_status_code() {
+        // 501 Not Implemented is a 5xx but not in the transient set
+        use reqwest::StatusCode;
+        assert!(!is_transient_status(StatusCode::NOT_IMPLEMENTED)); // 501
+    }
+
+    // --- compute_retry_delay ---
+
+    #[test]
+    fn test_compute_retry_delay_exponential_backoff_attempt1() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, None, 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(1),
+            "attempt 1 should yield 1s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_exponential_backoff_attempt2() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, None, 2);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(2),
+            "attempt 2 should yield 2s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_exponential_backoff_attempt3() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, None, 3);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(4),
+            "attempt 3 should yield 4s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_backoff_cap_at_large_attempt() {
+        use reqwest::StatusCode;
+        // attempt 7 would overflow without the .min(6) cap; capped result is 1 << 6 = 64s
+        let delay = compute_retry_delay(StatusCode::INTERNAL_SERVER_ERROR, None, 7);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(64),
+            "delay should be capped at 64s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_429_with_retry_after_header_uses_header_value() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::TOO_MANY_REQUESTS, Some(30), 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(30),
+            "Retry-After header value should override exponential backoff"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_429_without_retry_after_falls_back_to_backoff() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::TOO_MANY_REQUESTS, None, 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(1),
+            "missing Retry-After header should use exponential backoff"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_non_429_transient_ignores_retry_after() {
+        use reqwest::StatusCode;
+        // Retry-After is only honoured for 429; 503 should use exponential backoff
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, Some(60), 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(1),
+            "Retry-After must be ignored for non-429 status"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_429_zero_retry_after() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::TOO_MANY_REQUESTS, Some(0), 1);
+        assert_eq!(delay, std::time::Duration::from_secs(0));
+    }
+
+    // --- retry constants ---
+
+    #[test]
+    fn test_max_retries_is_three() {
+        assert_eq!(MAX_RETRIES, 3);
+    }
+
+    // --- VERBOSE flag ---
+
+    #[test]
+    fn test_verbose_flag_store_and_load() {
+        // Store false and reload — store path must be exercised
+        VERBOSE.store(false, Ordering::Relaxed);
+        assert!(!VERBOSE.load(Ordering::Relaxed));
     }
 }

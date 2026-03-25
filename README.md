@@ -621,6 +621,8 @@ runx --with node@22 -- node server.js
 
 Cached tools skip steps 1-3 — repeat runs start in **milliseconds**.
 
+Version resolution (step 1) is resilient to transient network failures: runx retries on 429, 500, 502, 503, and 504 responses up to 3 times with exponential backoff (1s, 2s, 4s), and respects `Retry-After` headers on rate-limit responses. Use `--verbose` to see retry messages.
+
 Every command runs in a **clean-room environment**:
 - **Inherited:** `HOME`, `USER`, `TERM`, `LANG`, `SHELL`, `TMPDIR`, plus `LC_*` and `XDG_*` prefixed vars
 - **Constructed:** `PATH` = tool bins + `/usr/bin:/bin`
@@ -718,7 +720,7 @@ OPTIONS:
   --with <TOOL@VERSION>   Tool to include (repeatable)
   --dry-run               Show what would happen without doing it
   --inherit-env           Pass through your full shell environment
-  -v, --verbose           Show download progress and debug info
+  -v, --verbose           Show download progress, debug info, and retry messages
   -q, --quiet             Suppress all progress output
   -V, --version           Print version
   -h, --help              Print help
@@ -730,7 +732,7 @@ OPTIONS:
 
 ```bash
 git clone https://github.com/supa-magic/runx.git && cd runx
-cargo test                    # 479 tests
+cargo test                    # 497 tests
 cargo clippy                  # Zero warnings policy
 cargo fmt --check             # Enforced formatting
 ```
