@@ -15,62 +15,66 @@ Env HOME "/Users/ab"
 # Install
 Type "echo '→ Install runx with one command'"
 Enter
-Sleep 500ms
+Sleep 1s
 Type "curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh"
 Enter
-Sleep 8s
-
+Sleep 10s
 Type 'export PATH="$HOME/.runx/bin:$PATH"'
 Enter
-Sleep 500ms
+Sleep 1s
 Type "clear"
 Enter
 Sleep 500ms
 
 # Node
+Type "echo"
+Enter
 Type "echo '→ Node.js — no nvm needed'"
 Enter
-Sleep 500ms
+Sleep 1s
 Type "runx --with node@22 -- node -v"
 Enter
-Sleep 5s
+Sleep 6s
 
-# Python
-Type "echo '→ Python — no pyenv, no conda'"
+# Go (more reliable than Python which can 504)
+Type "echo"
 Enter
-Sleep 500ms
-Type "runx --with python@3.12 -- python3 --version"
+Type "echo '→ Go — no goenv'"
 Enter
-Sleep 5s
+Sleep 1s
+Type "runx --with go -- go version"
+Enter
+Sleep 6s
 
 # Cached
-Type "echo '→ Second run is instant (cached)'"
+Type "echo"
 Enter
-Sleep 500ms
+Type "echo '→ Second run — instant from cache'"
+Enter
+Sleep 1s
 Type "runx --with node@22 -- node -v"
 Enter
-Sleep 2s
-
-# Vite + React
-Type "echo '→ Create a React app with Vite'"
-Enter
-Sleep 500ms
-Type "runx --with node -- npx create-vite my-app --template react"
-Enter
-Sleep 10s
+Sleep 3s
 
 # .runxrc
 Type "clear"
 Enter
 Sleep 500ms
-Type "echo '→ Pin versions for your team'"
+Type "echo"
+Enter
+Type "echo '→ Pin versions for your whole team'"
+Enter
+Sleep 1s
+Type 'echo '"'"'tools = ["node@22"]'"'"' > .runxrc'
 Enter
 Sleep 500ms
-Type 'echo '"'"'tools = ["node@22"]'"'"' > .runxrc && cat .runxrc'
+Type "cat .runxrc"
 Enter
 Sleep 2s
+Type "echo"
+Enter
 Type "runx -- node -v"
 Enter
-Sleep 3s
+Sleep 4s
 
 Sleep 2s
