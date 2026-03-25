@@ -33,22 +33,44 @@ impl RustProvider {
     /// Parse the stable version from the channel TOML manifest.
     ///
     /// Extracts the `pkg.rust.version` field which contains e.g. "1.94.0 (4a4ef493e 2026-03-02)".
+    /// Uses the `toml` crate (already a project dependency) to deserialize only the fields we need,
+    /// which is both more robust and more correct than line-scanning — the previous approach
+    /// returned the first `version = "..."` line, which could match the wrong package.
     fn parse_channel_version(toml_body: &str) -> Result<semver::Version, ProviderError> {
-        // The manifest is large (~800KB). Rather than pulling in a full TOML parser
-        // for a single field, we search for the version line directly.
-        // Format: `version = "1.94.0 (hash date)"`
-        for line in toml_body.lines() {
-            let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix("version = \"")
-                && let Some(ver_str) = rest.split_whitespace().next()
-                && let Ok(ver) = semver::Version::parse(ver_str)
-            {
-                return Ok(ver);
-            }
+        #[derive(serde::Deserialize)]
+        struct ChannelManifest {
+            pkg: PkgSection,
         }
-        Err(ProviderError::ResolutionFailed {
+        #[derive(serde::Deserialize)]
+        struct PkgSection {
+            rust: PkgEntry,
+        }
+        #[derive(serde::Deserialize)]
+        struct PkgEntry {
+            version: String,
+        }
+
+        let manifest: ChannelManifest =
+            toml::from_str(toml_body).map_err(|e| ProviderError::ResolutionFailed {
+                tool: "rust".to_string(),
+                reason: format!("failed to parse channel manifest: {e}"),
+            })?;
+
+        // Version field contains e.g. "1.94.0 (4a4ef493e 2026-03-02)" — take the first token
+        let ver_str = manifest
+            .pkg
+            .rust
+            .version
+            .split_whitespace()
+            .next()
+            .ok_or_else(|| ProviderError::ResolutionFailed {
+                tool: "rust".to_string(),
+                reason: "empty version string in channel manifest".to_string(),
+            })?;
+
+        semver::Version::parse(ver_str).map_err(|e| ProviderError::ResolutionFailed {
             tool: "rust".to_string(),
-            reason: "could not find version in channel manifest".to_string(),
+            reason: format!("invalid version `{ver_str}` in channel manifest: {e}"),
         })
     }
 
@@ -267,7 +289,10 @@ date = "2026-03-05"
 
     #[test]
     fn test_parse_channel_version_invalid_version_string() {
-        let toml = r#"version = "not-a-version""#;
+        let toml = r#"
+[pkg.rust]
+version = "not-a-version"
+"#;
         assert!(RustProvider::parse_channel_version(toml).is_err());
     }
 

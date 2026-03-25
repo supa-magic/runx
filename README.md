@@ -732,7 +732,7 @@ OPTIONS:
 
 ```bash
 git clone https://github.com/supa-magic/runx.git && cd runx
-cargo test                    # 483 tests
+cargo test                    # 497 tests
 cargo clippy                  # Zero warnings policy
 cargo fmt --check             # Enforced formatting
 ```
