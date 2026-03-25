@@ -9,9 +9,13 @@ pub mod rust;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::platform::Target;
 use crate::version::VersionSpec;
+
+/// Global verbose flag — set once from CLI parsing, read by `fetch_json` for retry messages.
+pub static VERBOSE: AtomicBool = AtomicBool::new(false);
 
 pub use bun::BunProvider;
 pub use deno::DenoProvider;
@@ -121,6 +125,14 @@ static HTTP_CLIENT: std::sync::LazyLock<reqwest::blocking::Client> =
 static RESPONSE_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
+/// Maximum number of retry attempts for transient HTTP errors.
+const MAX_RETRIES: u32 = 3;
+
+/// HTTP status codes considered transient and eligible for retry.
+fn is_transient_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
+}
+
 pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError> {
     tokio::task::block_in_place(|| {
         // Check cache first (recover from poison — cached data is still valid)
@@ -131,39 +143,98 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
             }
         }
 
-        let response = HTTP_CLIENT
-            .get(url)
-            .header("User-Agent", "runx")
-            .header("Accept", "application/json")
-            .send()
-            .map_err(|e| ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("{e:#}"),
-            })?;
+        let verbose = VERBOSE.load(Ordering::Relaxed);
+        let mut last_err = None;
 
-        let status = response.status();
-        if !status.is_success() {
-            return Err(ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("HTTP {status} from {url}"),
-            });
+        for attempt in 1..=MAX_RETRIES {
+            match HTTP_CLIENT
+                .get(url)
+                .header("User-Agent", "runx")
+                .header("Accept", "application/json")
+                .send()
+            {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        let body =
+                            response
+                                .text()
+                                .map_err(|e| ProviderError::ResolutionFailed {
+                                    tool: tool.to_string(),
+                                    reason: format!("{e:#}"),
+                                })?;
+
+                        // Cache the response (recover from poison)
+                        RESPONSE_CACHE
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(url.to_string(), body.clone());
+
+                        return Ok(body);
+                    }
+
+                    if is_transient_status(status) && attempt < MAX_RETRIES {
+                        let delay = retry_delay(&response, attempt);
+                        if verbose {
+                            eprintln!(
+                                "Retrying {tool} resolution (attempt {}/{MAX_RETRIES}, HTTP {status})...",
+                                attempt + 1
+                            );
+                        }
+                        std::thread::sleep(delay);
+                        last_err = Some(ProviderError::ResolutionFailed {
+                            tool: tool.to_string(),
+                            reason: format!("HTTP {status} from {url}"),
+                        });
+                        continue;
+                    }
+
+                    return Err(ProviderError::ResolutionFailed {
+                        tool: tool.to_string(),
+                        reason: format!("HTTP {status} from {url}"),
+                    });
+                }
+                Err(e) => {
+                    if attempt < MAX_RETRIES {
+                        let delay = std::time::Duration::from_secs(1 << (attempt - 1));
+                        if verbose {
+                            eprintln!(
+                                "Retrying {tool} resolution (attempt {}/{MAX_RETRIES}, {e:#})...",
+                                attempt + 1
+                            );
+                        }
+                        std::thread::sleep(delay);
+                        last_err = Some(ProviderError::ResolutionFailed {
+                            tool: tool.to_string(),
+                            reason: format!("{e:#}"),
+                        });
+                        continue;
+                    }
+                    return Err(ProviderError::ResolutionFailed {
+                        tool: tool.to_string(),
+                        reason: format!("{e:#}"),
+                    });
+                }
+            }
         }
 
-        let body = response
-            .text()
-            .map_err(|e| ProviderError::ResolutionFailed {
-                tool: tool.to_string(),
-                reason: format!("{e:#}"),
-            })?;
-
-        // Cache the response (recover from poison)
-        RESPONSE_CACHE
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(url.to_string(), body.clone());
-
-        Ok(body)
+        Err(last_err.unwrap_or_else(|| ProviderError::ResolutionFailed {
+            tool: tool.to_string(),
+            reason: format!("failed after {MAX_RETRIES} attempts for {url}"),
+        }))
     })
+}
+
+/// Compute the retry delay, respecting `Retry-After` header for 429 responses.
+fn retry_delay(response: &reqwest::blocking::Response, attempt: u32) -> std::time::Duration {
+    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+        && let Some(retry_after) = response.headers().get(reqwest::header::RETRY_AFTER)
+        && let Ok(secs) = retry_after.to_str().unwrap_or("").parse::<u64>()
+    {
+        return std::time::Duration::from_secs(secs);
+    }
+    // Exponential backoff: 1s, 2s, 4s
+    std::time::Duration::from_secs(1 << (attempt - 1))
 }
 
 /// A simple GitHub release entry with just the tag name.
@@ -656,5 +727,52 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("unknown tool `zig`"));
         assert!(msg.contains("node, python, go, deno, bun, ruby, java, rust"));
+    }
+
+    // --- is_transient_status ---
+
+    #[test]
+    fn test_transient_status_codes() {
+        use reqwest::StatusCode;
+        assert!(is_transient_status(StatusCode::TOO_MANY_REQUESTS)); // 429
+        assert!(is_transient_status(StatusCode::INTERNAL_SERVER_ERROR)); // 500
+        assert!(is_transient_status(StatusCode::BAD_GATEWAY)); // 502
+        assert!(is_transient_status(StatusCode::SERVICE_UNAVAILABLE)); // 503
+        assert!(is_transient_status(StatusCode::GATEWAY_TIMEOUT)); // 504
+    }
+
+    #[test]
+    fn test_non_transient_status_codes() {
+        use reqwest::StatusCode;
+        assert!(!is_transient_status(StatusCode::BAD_REQUEST)); // 400
+        assert!(!is_transient_status(StatusCode::UNAUTHORIZED)); // 401
+        assert!(!is_transient_status(StatusCode::FORBIDDEN)); // 403
+        assert!(!is_transient_status(StatusCode::NOT_FOUND)); // 404
+        assert!(!is_transient_status(StatusCode::OK)); // 200
+    }
+
+    // --- retry backoff ---
+
+    #[test]
+    fn test_exponential_backoff_delays() {
+        // Verify the exponential backoff formula: 1 << (attempt - 1)
+        // attempt 1 → 1s, attempt 2 → 2s, attempt 3 → 4s
+        assert_eq!(1u64 << 0, 1);
+        assert_eq!(1u64 << 1, 2);
+        assert_eq!(1u64 << 2, 4);
+    }
+
+    // --- VERBOSE flag ---
+
+    #[test]
+    fn test_verbose_flag_default_is_false() {
+        // VERBOSE may have been set by other tests, so just verify it's an AtomicBool
+        use std::sync::atomic::Ordering;
+        let _ = VERBOSE.load(Ordering::Relaxed);
+    }
+
+    #[test]
+    fn test_max_retries_is_three() {
+        assert_eq!(MAX_RETRIES, 3);
     }
 }

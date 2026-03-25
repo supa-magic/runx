@@ -15,6 +15,8 @@ use crate::provider::{self, ArchiveFormat, Provider};
 
 /// Dispatch CLI arguments to the appropriate subcommand handler.
 pub async fn run(cli: Cli) -> Result<(), RunxError> {
+    crate::provider::VERBOSE.store(cli.verbose, std::sync::atomic::Ordering::Relaxed);
+
     match cli.command {
         Some(Command::Clean {
             tool,
