@@ -144,10 +144,11 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
         }
 
         let verbose = VERBOSE.load(Ordering::Relaxed);
-        let mut last_err = None;
+        let mut last_reason = String::new();
 
         for attempt in 1..=MAX_RETRIES {
-            match HTTP_CLIENT
+            // Determine the outcome and whether it's retryable
+            let (reason, delay) = match HTTP_CLIENT
                 .get(url)
                 .header("User-Agent", "runx")
                 .header("Accept", "application/json")
@@ -173,55 +174,42 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
                         return Ok(body);
                     }
 
-                    if is_transient_status(status) && attempt < MAX_RETRIES {
-                        let delay = retry_delay(&response, attempt);
-                        if verbose {
-                            eprintln!(
-                                "Retrying {tool} resolution (attempt {}/{MAX_RETRIES}, HTTP {status})...",
-                                attempt + 1
-                            );
-                        }
-                        std::thread::sleep(delay);
-                        last_err = Some(ProviderError::ResolutionFailed {
-                            tool: tool.to_string(),
-                            reason: format!("HTTP {status} from {url}"),
-                        });
-                        continue;
-                    }
-
-                    return Err(ProviderError::ResolutionFailed {
-                        tool: tool.to_string(),
-                        reason: format!("HTTP {status} from {url}"),
-                    });
+                    let delay = if is_transient_status(status) {
+                        Some(retry_delay(&response, attempt))
+                    } else {
+                        None
+                    };
+                    (format!("HTTP {status} from {url}"), delay)
                 }
                 Err(e) => {
-                    if attempt < MAX_RETRIES {
-                        let delay = std::time::Duration::from_secs(1 << (attempt - 1));
-                        if verbose {
-                            eprintln!(
-                                "Retrying {tool} resolution (attempt {}/{MAX_RETRIES}, {e:#})...",
-                                attempt + 1
-                            );
-                        }
-                        std::thread::sleep(delay);
-                        last_err = Some(ProviderError::ResolutionFailed {
-                            tool: tool.to_string(),
-                            reason: format!("{e:#}"),
-                        });
-                        continue;
-                    }
-                    return Err(ProviderError::ResolutionFailed {
-                        tool: tool.to_string(),
-                        reason: format!("{e:#}"),
-                    });
+                    let delay = Some(std::time::Duration::from_secs(1u64 << (attempt - 1).min(6)));
+                    (format!("{e:#}"), delay)
                 }
+            };
+
+            // Non-retryable error, or final attempt — return immediately
+            let Some(delay) = delay.filter(|_| attempt < MAX_RETRIES) else {
+                return Err(ProviderError::ResolutionFailed {
+                    tool: tool.to_string(),
+                    reason,
+                });
+            };
+
+            if verbose {
+                eprintln!(
+                    "Retrying {tool} resolution (attempt {}/{MAX_RETRIES}, {reason})...",
+                    attempt + 1
+                );
             }
+            std::thread::sleep(delay);
+            last_reason = reason;
         }
 
-        Err(last_err.unwrap_or_else(|| ProviderError::ResolutionFailed {
+        // Unreachable in practice (the loop always returns), but keeps the compiler happy
+        Err(ProviderError::ResolutionFailed {
             tool: tool.to_string(),
-            reason: format!("failed after {MAX_RETRIES} attempts for {url}"),
-        }))
+            reason: last_reason,
+        })
     })
 }
 
@@ -233,8 +221,8 @@ fn retry_delay(response: &reqwest::blocking::Response, attempt: u32) -> std::tim
     {
         return std::time::Duration::from_secs(secs);
     }
-    // Exponential backoff: 1s, 2s, 4s
-    std::time::Duration::from_secs(1 << (attempt - 1))
+    // Exponential backoff: 1s, 2s, 4s — capped at 64s to prevent shift overflow
+    std::time::Duration::from_secs(1u64 << (attempt - 1).min(6))
 }
 
 /// A simple GitHub release entry with just the tag name.
