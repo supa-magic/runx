@@ -13,10 +13,17 @@ Env PATH "/usr/local/bin:/Users/ab/.runx/bin:/opt/homebrew/bin:/usr/bin:/bin"
 Env HOME "/Users/ab"
 Env npm_config_yes "true"
 
-# Install
-Type "echo '📦 Install runx'"
+# Clean cache so downloads are visible
+Hide
+Type "runx clean -y 2>/dev/null; rm -rf my-app"
 Enter
-Sleep 1s
+Sleep 2s
+Type "clear"
+Enter
+Sleep 500ms
+Show
+
+# Install
 Type "curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh"
 Enter
 Sleep 10s
@@ -27,37 +34,24 @@ Type "clear"
 Enter
 Sleep 500ms
 
-# React + Vite frontend
-Type "echo"
+# React + Vite
+Type "runx --with node -- npx create-vite my-app --template react"
 Enter
-Type "echo '⚛️  Create a React app with Vite'"
-Enter
-Sleep 1s
-Type "runx --with node@22 -- npx create-vite my-app --template react"
-Enter
-Sleep 12s
+Sleep 15s
 Type "clear"
 Enter
 Sleep 500ms
 
-# Python backend
-Type "echo"
-Enter
-Type "echo '🐍 Python backend'"
-Enter
-Sleep 1s
+# Python
 Type "runx --with python@3.12 -- python3 --version"
 Enter
-Sleep 6s
+Sleep 8s
 
-# Both together
+# Full-stack
 Type "echo"
 Enter
-Type "echo '🚀 Full-stack: Node + Python together'"
+Type "runx --with node --with python@3.12 -- node -v"
 Enter
-Sleep 1s
-Type "runx --with node@22 --with python@3.12 -- node -v"
-Enter
-Sleep 6s
+Sleep 4s
 
 Sleep 2s
