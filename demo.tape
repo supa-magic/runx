@@ -11,9 +11,10 @@ Set TypingSpeed 35ms
 Set Shell "bash"
 Env PATH "/usr/local/bin:/Users/ab/.runx/bin:/opt/homebrew/bin:/usr/bin:/bin"
 Env HOME "/Users/ab"
+Env npm_config_yes "true"
 
 # Install
-Type "echo '→ Install runx with one command'"
+Type "echo '📦 Install runx'"
 Enter
 Sleep 1s
 Type "curl -fsSL https://raw.githubusercontent.com/supa-magic/runx/main/install.sh | sh"
@@ -26,55 +27,37 @@ Type "clear"
 Enter
 Sleep 500ms
 
-# Node
+# React + Vite frontend
 Type "echo"
 Enter
-Type "echo '→ Node.js — no nvm needed'"
+Type "echo '⚛️  Create a React app with Vite'"
 Enter
 Sleep 1s
-Type "runx --with node@22 -- node -v"
+Type "runx --with node@22 -- npx create-vite my-app --template react"
 Enter
-Sleep 6s
-
-# Go (more reliable than Python which can 504)
-Type "echo"
-Enter
-Type "echo '→ Go — no goenv'"
-Enter
-Sleep 1s
-Type "runx --with go -- go version"
-Enter
-Sleep 6s
-
-# Cached
-Type "echo"
-Enter
-Type "echo '→ Second run — instant from cache'"
-Enter
-Sleep 1s
-Type "runx --with node@22 -- node -v"
-Enter
-Sleep 3s
-
-# .runxrc
+Sleep 12s
 Type "clear"
 Enter
 Sleep 500ms
+
+# Python backend
 Type "echo"
 Enter
-Type "echo '→ Pin versions for your whole team'"
+Type "echo '🐍 Python backend'"
 Enter
 Sleep 1s
-Type 'echo '"'"'tools = ["node@22"]'"'"' > .runxrc'
+Type "runx --with python@3.12 -- python3 --version"
 Enter
-Sleep 500ms
-Type "cat .runxrc"
-Enter
-Sleep 2s
+Sleep 6s
+
+# Both together
 Type "echo"
 Enter
-Type "runx -- node -v"
+Type "echo '🚀 Full-stack: Node + Python together'"
 Enter
-Sleep 4s
+Sleep 1s
+Type "runx --with node@22 --with python@3.12 -- node -v"
+Enter
+Sleep 6s
 
 Sleep 2s
