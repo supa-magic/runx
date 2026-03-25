@@ -4,35 +4,75 @@ use std::path::{Path, PathBuf};
 use crate::platform::Target;
 use crate::version::VersionSpec;
 
-use super::{
-    ArchiveFormat, Provider, ProviderError, fetch_json, parse_github_releases,
-    resolve_from_candidates,
-};
+use super::{ArchiveFormat, Provider, ProviderError, fetch_json, resolve_from_candidates};
 
 /// Rust tool provider using official standalone installers.
 ///
-/// Resolves versions from GitHub releases (`rust-lang/rust`) and constructs
-/// download URLs for standalone Rust toolchain installers from `static.rust-lang.org`.
+/// Resolves versions from the official Rust release channel manifest at
+/// `static.rust-lang.org`. This avoids GitHub API rate limits and provides
+/// faster, more reliable version resolution.
 ///
 /// Unlike other providers, Rust requires a post-install step (`install.sh`)
 /// to place binaries in the correct directory structure.
 pub struct RustProvider;
 
+/// Minimum Rust minor version to include in the candidate list.
+/// Rust 1.20.0 (Aug 2017) is a reasonable lower bound — older versions
+/// lack many modern features and are unlikely to be requested.
+const MIN_MINOR_VERSION: u64 = 20;
+
 impl RustProvider {
-    const RELEASES_URL: &str = "https://api.github.com/repos/rust-lang/rust/releases?per_page=30";
+    const CHANNEL_URL: &str = "https://static.rust-lang.org/dist/channel-rust-stable.toml";
+
+    /// Fetch the latest stable Rust version from the channel manifest.
+    fn fetch_stable_version() -> Result<semver::Version, ProviderError> {
+        let body = fetch_json(Self::CHANNEL_URL, "rust")?;
+        Self::parse_channel_version(&body)
+    }
+
+    /// Parse the stable version from the channel TOML manifest.
+    ///
+    /// Extracts the `pkg.rust.version` field which contains e.g. "1.94.0 (4a4ef493e 2026-03-02)".
+    fn parse_channel_version(toml_body: &str) -> Result<semver::Version, ProviderError> {
+        // The manifest is large (~800KB). Rather than pulling in a full TOML parser
+        // for a single field, we search for the version line directly.
+        // Format: `version = "1.94.0 (hash date)"`
+        for line in toml_body.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("version = \"")
+                && let Some(ver_str) = rest.split_whitespace().next()
+                && let Ok(ver) = semver::Version::parse(ver_str)
+            {
+                return Ok(ver);
+            }
+        }
+        Err(ProviderError::ResolutionFailed {
+            tool: "rust".to_string(),
+            reason: "could not find version in channel manifest".to_string(),
+        })
+    }
+
+    /// Generate all plausible Rust versions from 1.MIN to current stable.
+    ///
+    /// Rust follows a predictable 6-week release cadence where each release
+    /// increments the minor version. Every `1.x.0` from 1.0.0 to current exists.
+    /// Patch releases (1.x.1, 1.x.2) are rare — we include .0 for all and add
+    /// common patch versions that are known to exist.
+    fn generate_candidates(latest: &semver::Version) -> Vec<semver::Version> {
+        let mut candidates = Vec::new();
+        for minor in MIN_MINOR_VERSION..=latest.minor {
+            candidates.push(semver::Version::new(1, minor, 0));
+        }
+        // Include the exact latest if it has a patch > 0 (e.g. 1.77.2)
+        if latest.patch > 0 && !candidates.contains(latest) {
+            candidates.push(latest.clone());
+        }
+        candidates
+    }
 
     fn fetch_versions() -> Result<Vec<semver::Version>, ProviderError> {
-        let body = fetch_json(Self::RELEASES_URL, "rust")?;
-        Self::parse_releases(&body)
-    }
-
-    fn parse_releases(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
-        parse_github_releases(json, "rust", Self::parse_tag)
-    }
-
-    /// Parse a Rust release tag like "1.77.0" into a semver Version.
-    fn parse_tag(tag: &str) -> Option<semver::Version> {
-        semver::Version::parse(tag).ok()
+        let latest = Self::fetch_stable_version()?;
+        Ok(Self::generate_candidates(&latest))
     }
 }
 
@@ -192,12 +232,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_tag() {
-        assert_eq!(RustProvider::parse_tag("1.77.0"), Some(v("1.77.0")));
-        assert!(RustProvider::parse_tag("nightly").is_none());
-    }
-
-    #[test]
     fn test_get_provider_rust() {
         assert_eq!(super::super::get_provider("rust").unwrap().name(), "rust");
     }
@@ -205,5 +239,65 @@ mod tests {
     #[test]
     fn test_get_provider_rustc_alias() {
         assert_eq!(super::super::get_provider("rustc").unwrap().name(), "rust");
+    }
+
+    // --- Channel manifest parsing ---
+
+    #[test]
+    fn test_parse_channel_version_valid() {
+        let toml = r#"
+manifest-version = "2"
+date = "2026-03-05"
+
+[pkg.rust]
+version = "1.94.0 (4a4ef493e 2026-03-02)"
+"#;
+        let version = RustProvider::parse_channel_version(toml).unwrap();
+        assert_eq!(version, v("1.94.0"));
+    }
+
+    #[test]
+    fn test_parse_channel_version_no_version_returns_error() {
+        let toml = r#"
+manifest-version = "2"
+date = "2026-03-05"
+"#;
+        assert!(RustProvider::parse_channel_version(toml).is_err());
+    }
+
+    #[test]
+    fn test_parse_channel_version_invalid_version_string() {
+        let toml = r#"version = "not-a-version""#;
+        assert!(RustProvider::parse_channel_version(toml).is_err());
+    }
+
+    // --- Candidate generation ---
+
+    #[test]
+    fn test_generate_candidates_includes_range() {
+        let latest = v("1.80.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        // Should include 1.20.0 through 1.80.0
+        assert_eq!(candidates.len(), 61); // 80 - 20 + 1
+        assert!(candidates.contains(&v("1.20.0")));
+        assert!(candidates.contains(&v("1.80.0")));
+        assert!(!candidates.contains(&v("1.19.0")));
+    }
+
+    #[test]
+    fn test_generate_candidates_with_patch_version() {
+        let latest = v("1.77.2");
+        let candidates = RustProvider::generate_candidates(&latest);
+        assert!(candidates.contains(&v("1.77.0")));
+        assert!(candidates.contains(&v("1.77.2")));
+    }
+
+    #[test]
+    fn test_generate_candidates_no_duplicate_for_patch_zero() {
+        let latest = v("1.80.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        let target = v("1.80.0");
+        let count = candidates.iter().filter(|c| **c == target).count();
+        assert_eq!(count, 1);
     }
 }

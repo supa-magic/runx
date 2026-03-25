@@ -5,32 +5,47 @@ use crate::platform::{Arch, Platform, Target};
 use crate::version::VersionSpec;
 
 use super::{
-    ArchiveFormat, Provider, ProviderError, fetch_json, parse_github_releases,
+    ArchiveFormat, Provider, ProviderError, collect_stable_versions, fetch_json,
     resolve_from_candidates,
 };
 
 /// Deno tool provider.
 ///
-/// Resolves versions from GitHub releases (`denoland/deno`) and constructs
-/// download URLs for the official Deno binary distributions.
+/// Resolves versions from the official Deno versions endpoint at `deno.com/versions.json`,
+/// avoiding GitHub API rate limits. Download URLs still point to GitHub releases.
 ///
 /// Deno distributes a single binary per platform, packaged as a zip archive.
 pub struct DenoProvider;
 
 impl DenoProvider {
-    const RELEASES_URL: &str = "https://api.github.com/repos/denoland/deno/releases?per_page=100";
+    const VERSIONS_URL: &str = "https://deno.com/versions.json";
 
     fn fetch_versions() -> Result<Vec<semver::Version>, ProviderError> {
-        let body = fetch_json(Self::RELEASES_URL, "deno")?;
-        Self::parse_releases(&body)
+        let body = fetch_json(Self::VERSIONS_URL, "deno")?;
+        Self::parse_versions(&body)
     }
 
-    /// Parse GitHub releases JSON into a list of stable Deno versions.
-    fn parse_releases(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
-        parse_github_releases(json, "deno", Self::parse_tag)
+    /// Parse the versions JSON which has format: `{"std": [...], "cli": ["v2.7.7", "v2.7.6", ...]}`
+    fn parse_versions(json: &str) -> Result<Vec<semver::Version>, ProviderError> {
+        let parsed: DenoVersionsResponse =
+            serde_json::from_str(json).map_err(|e| ProviderError::ResolutionFailed {
+                tool: "deno".to_string(),
+                reason: format!("failed to parse versions JSON: {e}"),
+            })?;
+
+        let versions = collect_stable_versions(parsed.cli.iter().map(|tag| Self::parse_tag(tag)));
+
+        if versions.is_empty() {
+            return Err(ProviderError::ResolutionFailed {
+                tool: "deno".to_string(),
+                reason: "no stable versions found".to_string(),
+            });
+        }
+
+        Ok(versions)
     }
 
-    /// Parse a Deno release tag like "v1.40.5" into a semver Version.
+    /// Parse a Deno version tag like "v1.40.5" into a semver Version.
     fn parse_tag(tag: &str) -> Option<semver::Version> {
         let ver_str = tag.strip_prefix('v')?;
         semver::Version::parse(ver_str).ok()
@@ -50,6 +65,11 @@ impl DenoProvider {
             }),
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+struct DenoVersionsResponse {
+    cli: Vec<String>,
 }
 
 impl Provider for DenoProvider {
@@ -221,56 +241,47 @@ mod tests {
         assert!(DenoProvider::parse_tag("vnotaversion").is_none());
     }
 
-    // --- parse_releases ---
+    // --- parse_versions (new format) ---
 
     #[test]
-    fn test_parse_releases_basic() {
-        let json = r#"[
-            {"tag_name": "v1.40.5"},
-            {"tag_name": "v1.40.4"},
-            {"tag_name": "v1.39.0"}
-        ]"#;
-        let versions = DenoProvider::parse_releases(json).unwrap();
+    fn test_parse_versions_basic() {
+        let json = r#"{"std": [], "cli": ["v2.7.7", "v2.7.6", "v1.40.5"]}"#;
+        let versions = DenoProvider::parse_versions(json).unwrap();
         assert_eq!(versions.len(), 3);
+        assert!(versions.contains(&v("2.7.7")));
         assert!(versions.contains(&v("1.40.5")));
-        assert!(versions.contains(&v("1.39.0")));
     }
 
     #[test]
-    fn test_parse_releases_filters_prerelease() {
-        let json = r#"[
-            {"tag_name": "v2.0.0-rc.1"},
-            {"tag_name": "v1.40.5"}
-        ]"#;
-        let versions = DenoProvider::parse_releases(json).unwrap();
+    fn test_parse_versions_filters_prerelease() {
+        let json = r#"{"std": [], "cli": ["v2.0.0-rc.1", "v1.40.5"]}"#;
+        let versions = DenoProvider::parse_versions(json).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0], v("1.40.5"));
     }
 
     #[test]
-    fn test_parse_releases_all_unparseable_returns_error() {
-        let json = r#"[{"tag_name": "notaversion"}, {"tag_name": "also-bad"}]"#;
-        assert!(DenoProvider::parse_releases(json).is_err());
+    fn test_parse_versions_all_unparseable_returns_error() {
+        let json = r#"{"std": [], "cli": ["notaversion", "also-bad"]}"#;
+        assert!(DenoProvider::parse_versions(json).is_err());
     }
 
     #[test]
-    fn test_parse_releases_deduplicates() {
-        let json = r#"[
-            {"tag_name": "v1.40.5"},
-            {"tag_name": "v1.40.5"}
-        ]"#;
-        let versions = DenoProvider::parse_releases(json).unwrap();
+    fn test_parse_versions_deduplicates() {
+        let json = r#"{"std": [], "cli": ["v1.40.5", "v1.40.5"]}"#;
+        let versions = DenoProvider::parse_versions(json).unwrap();
         assert_eq!(versions.len(), 1);
     }
 
     #[test]
-    fn test_parse_releases_empty_returns_error() {
-        assert!(DenoProvider::parse_releases("[]").is_err());
+    fn test_parse_versions_empty_cli_returns_error() {
+        let json = r#"{"std": [], "cli": []}"#;
+        assert!(DenoProvider::parse_versions(json).is_err());
     }
 
     #[test]
-    fn test_parse_releases_invalid_json() {
-        assert!(DenoProvider::parse_releases("not json").is_err());
+    fn test_parse_versions_invalid_json() {
+        assert!(DenoProvider::parse_versions("not json").is_err());
     }
 
     // --- deno_target ---
