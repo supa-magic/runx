@@ -284,6 +284,14 @@ mod tests {
         assert!(DenoProvider::parse_versions("not json").is_err());
     }
 
+    #[test]
+    fn test_parse_versions_missing_cli_field_returns_error() {
+        // If the JSON lacks a "cli" field, deserialization should fail gracefully
+        let json = r#"{"std": ["0.200.0", "0.199.0"]}"#;
+        let result = DenoProvider::parse_versions(json);
+        assert!(result.is_err());
+    }
+
     // --- deno_target ---
 
     #[test]

@@ -81,12 +81,20 @@ impl RustProvider {
     /// Patch releases (1.x.1, 1.x.2) are rare — we include .0 for all and add
     /// common patch versions that are known to exist.
     fn generate_candidates(latest: &semver::Version) -> Vec<semver::Version> {
-        let mut candidates = Vec::new();
+        let range_count = if latest.minor >= MIN_MINOR_VERSION {
+            (latest.minor - MIN_MINOR_VERSION + 1) as usize
+        } else {
+            0
+        };
+        let count = range_count + usize::from(latest.patch > 0);
+        let mut candidates = Vec::with_capacity(count);
         for minor in MIN_MINOR_VERSION..=latest.minor {
             candidates.push(semver::Version::new(1, minor, 0));
         }
-        // Include the exact latest if it has a patch > 0 (e.g. 1.77.2)
-        if latest.patch > 0 && !candidates.contains(latest) {
+        // Include the exact latest if it has a patch > 0 (e.g. 1.77.2).
+        // The contains() check is unnecessary — all generated versions have patch=0,
+        // so a latest with patch > 0 is guaranteed to be absent.
+        if latest.patch > 0 {
             candidates.push(latest.clone());
         }
         candidates
@@ -296,6 +304,39 @@ version = "not-a-version"
         assert!(RustProvider::parse_channel_version(toml).is_err());
     }
 
+    #[test]
+    fn test_parse_channel_version_multi_package_manifest() {
+        // The real manifest has version lines for cargo, clippy, rustfmt, etc.
+        // We must extract only pkg.rust.version, not the first version = line.
+        let toml = r#"
+manifest-version = "2"
+date = "2026-03-05"
+
+[pkg.cargo]
+version = "0.95.0 (abc1234 2026-03-01)"
+
+[pkg.rust]
+version = "1.94.0 (4a4ef493e 2026-03-02)"
+
+[pkg.clippy]
+version = "0.1.94 (def5678 2026-03-02)"
+"#;
+        let version = RustProvider::parse_channel_version(toml).unwrap();
+        assert_eq!(version, v("1.94.0"));
+    }
+
+    #[test]
+    fn test_parse_channel_version_no_pkg_rust_returns_error() {
+        // Manifest that has other packages but no [pkg.rust] section
+        let toml = r#"
+manifest-version = "2"
+
+[pkg.cargo]
+version = "0.95.0 (abc1234 2026-03-01)"
+"#;
+        assert!(RustProvider::parse_channel_version(toml).is_err());
+    }
+
     // --- Candidate generation ---
 
     #[test]
@@ -324,5 +365,21 @@ version = "not-a-version"
         let target = v("1.80.0");
         let count = candidates.iter().filter(|c| **c == target).count();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_generate_candidates_below_min_minor_returns_empty() {
+        // If latest.minor < MIN_MINOR_VERSION, the range is empty
+        let latest = v("1.19.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn test_generate_candidates_exact_min_minor() {
+        let latest = v("1.20.0");
+        let candidates = RustProvider::generate_candidates(&latest);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], v("1.20.0"));
     }
 }
