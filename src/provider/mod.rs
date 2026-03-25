@@ -215,9 +215,26 @@ pub fn fetch_json(url: &str, tool: &'static str) -> Result<String, ProviderError
 
 /// Compute the retry delay, respecting `Retry-After` header for 429 responses.
 fn retry_delay(response: &reqwest::blocking::Response, attempt: u32) -> std::time::Duration {
-    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
-        && let Some(retry_after) = response.headers().get(reqwest::header::RETRY_AFTER)
-        && let Ok(secs) = retry_after.to_str().unwrap_or("").parse::<u64>()
+    let retry_after_secs = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    compute_retry_delay(response.status(), retry_after_secs, attempt)
+}
+
+/// Pure delay computation — separated so it can be unit-tested without a live HTTP response.
+///
+/// For 429 responses with a valid numeric `Retry-After` header, that value (seconds) is used.
+/// Otherwise, exponential backoff applies: attempt 1 → 1s, attempt 2 → 2s, attempt 3 → 4s,
+/// capped at 64s to prevent shift overflow on large attempt counts.
+fn compute_retry_delay(
+    status: reqwest::StatusCode,
+    retry_after_secs: Option<u64>,
+    attempt: u32,
+) -> std::time::Duration {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        && let Some(secs) = retry_after_secs
     {
         return std::time::Duration::from_secs(secs);
     }
@@ -739,28 +756,114 @@ mod tests {
         assert!(!is_transient_status(StatusCode::OK)); // 200
     }
 
-    // --- retry backoff ---
+    #[test]
+    fn test_non_transient_5xx_status_code() {
+        // 501 Not Implemented is a 5xx but not in the transient set
+        use reqwest::StatusCode;
+        assert!(!is_transient_status(StatusCode::NOT_IMPLEMENTED)); // 501
+    }
+
+    // --- compute_retry_delay ---
 
     #[test]
-    fn test_exponential_backoff_delays() {
-        // Verify the exponential backoff formula: 1 << (attempt - 1)
-        // attempt 1 → 1s, attempt 2 → 2s, attempt 3 → 4s
-        assert_eq!(1u64 << 0, 1);
-        assert_eq!(1u64 << 1, 2);
-        assert_eq!(1u64 << 2, 4);
+    fn test_compute_retry_delay_exponential_backoff_attempt1() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, None, 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(1),
+            "attempt 1 should yield 1s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_exponential_backoff_attempt2() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, None, 2);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(2),
+            "attempt 2 should yield 2s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_exponential_backoff_attempt3() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, None, 3);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(4),
+            "attempt 3 should yield 4s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_backoff_cap_at_large_attempt() {
+        use reqwest::StatusCode;
+        // attempt 7 would overflow without the .min(6) cap; capped result is 1 << 6 = 64s
+        let delay = compute_retry_delay(StatusCode::INTERNAL_SERVER_ERROR, None, 7);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(64),
+            "delay should be capped at 64s"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_429_with_retry_after_header_uses_header_value() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::TOO_MANY_REQUESTS, Some(30), 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(30),
+            "Retry-After header value should override exponential backoff"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_429_without_retry_after_falls_back_to_backoff() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::TOO_MANY_REQUESTS, None, 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(1),
+            "missing Retry-After header should use exponential backoff"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_non_429_transient_ignores_retry_after() {
+        use reqwest::StatusCode;
+        // Retry-After is only honoured for 429; 503 should use exponential backoff
+        let delay = compute_retry_delay(StatusCode::SERVICE_UNAVAILABLE, Some(60), 1);
+        assert_eq!(
+            delay,
+            std::time::Duration::from_secs(1),
+            "Retry-After must be ignored for non-429 status"
+        );
+    }
+
+    #[test]
+    fn test_compute_retry_delay_429_zero_retry_after() {
+        use reqwest::StatusCode;
+        let delay = compute_retry_delay(StatusCode::TOO_MANY_REQUESTS, Some(0), 1);
+        assert_eq!(delay, std::time::Duration::from_secs(0));
+    }
+
+    // --- retry constants ---
+
+    #[test]
+    fn test_max_retries_is_three() {
+        assert_eq!(MAX_RETRIES, 3);
     }
 
     // --- VERBOSE flag ---
 
     #[test]
-    fn test_verbose_flag_default_is_false() {
-        // VERBOSE may have been set by other tests, so just verify it's an AtomicBool
-        use std::sync::atomic::Ordering;
-        let _ = VERBOSE.load(Ordering::Relaxed);
-    }
-
-    #[test]
-    fn test_max_retries_is_three() {
-        assert_eq!(MAX_RETRIES, 3);
+    fn test_verbose_flag_store_and_load() {
+        // Store false and reload — store path must be exercised
+        VERBOSE.store(false, Ordering::Relaxed);
+        assert!(!VERBOSE.load(Ordering::Relaxed));
     }
 }
