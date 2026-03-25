@@ -11,7 +11,7 @@ cargo build                              # build
 cargo run                                # run
 cargo fmt --check                        # check formatting
 cargo clippy --all-targets --all-features # lint
-cargo test                               # all tests (463 passing)
+cargo test                               # all tests (483 passing)
 cargo test --doc                         # doctests only
 cargo check                              # type check without building
 ```
@@ -42,7 +42,7 @@ src/
   environment.rs       # Isolated/inherited environment construction, TempDirs RAII guard
   executor.rs          # Child process spawning, signal forwarding (SIGTERM on Unix), exit code handling
   provider/
-    mod.rs             # Provider trait, get_provider() dispatch, ProviderError, ArchiveFormat
+    mod.rs             # Provider trait, get_provider() dispatch, ProviderError, ArchiveFormat, fetch_json() with retry (3 attempts, exponential backoff, Retry-After support)
     node.rs            # Node.js provider (nodejs.org dist index)
     python.rs          # Python provider (python-build-standalone GitHub releases)
     go.rs              # Go provider (go.dev official binary distributions)
